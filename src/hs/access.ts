@@ -102,7 +102,7 @@ export class SurvivalAccess {
         visit(source, quantified);
     }
 
-    private checkCommand(name: string) {
+    checkCommand(name: string) {
         const unlocks: Record<string, string[]> = {
             m: ["macro"], hyp: ["hyp"], mcpt: ["mcpt"], mcnt: ["mnt"],
             cond: ["mct", "mdt", "mcpt"], var: ["1st", "mcvt", "mvt", "met"], dir: ["mkdir"],

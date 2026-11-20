@@ -13,13 +13,14 @@ import { MSBT, MCPT, MCNT } from "./core/combine.js";
 import { NodeType } from "../asttype.js";
 import { LangMgr } from "../lang.js";
 import { Serde } from "./serde.js";
-import { SheetGui } from "./gui/sheet.js";
+import { SheetGui, type PropSheet } from "./gui/sheet.js";
 import { initialCreativeRules, initialSurvivalRules } from "./core/initial.js";
 import { SurvivalAccess } from "./access.js";
 import { getSurvivalRules } from "./rewards.js";
 import { checkDeletion, deleteSelection, planDeletion, DeletionPlan } from "./editing.js";
 import { EditingTarget, findTargets, targetAtom, targetList } from "./targets.js";
 import { ProofNavigator } from "./proof-navigation.js";
+import { ProofAssistantPanel } from "./gui/proof-assistant.js";
 
 // a/d 开头的公理规则在存档中只存名称占位（name:ax:.），内容以初始定义为准：
 // 这样存档体积小、作者更新 init 规则后玩家无需重置存档。
@@ -49,6 +50,7 @@ export class HSLayer {
     private serde = new Serde(this, this.hilbertSystem, this.ruleList, this.propListView, this.ruleListView);
     private sheetGui = new SheetGui(this.hilbertSystem);
     private navigator = new ProofNavigator(this.hilbertSystem, () => this.refreshInspection());
+    private assistantPanel?: ProofAssistantPanel<PropSheet>;
     private inspectionExpanded: Set<number> | null = null;
     private inspectionRuleExpanded: Set<number> | null = null;
     onchange?: () => void;
@@ -487,7 +489,13 @@ export class HSLayer {
             if (this.navigator.active && name !== "entr") throw HSError.cmdIsRunning;
         };
         this.sheetGui.onRefresh = () => this.propListView.setData(this.hilbertSystem.props);
-        this.sheetGui.onChange = () => this.onchange?.();
+        this.assistantPanel = new ProofAssistantPanel(document.getElementById("hs-assistant")!, this.hilbertSystem,
+            () => this.sheetGui.sheets[this.sheetGui.activeIndex], () => this.survivalAccess ?? undefined,
+            this.sheetGui.guard, name => {
+                if (name !== undefined) this.addRecordedRule(name);
+                this.refresh();
+            });
+        this.sheetGui.onChange = () => { this.assistantPanel?.showSheet(); this.onchange?.(); };
         // 展开状态：expandedFolders按uuid存储，持久化用逻辑id（uuid为listview内部生成，不入存档）
         this.sheetGui.captureExpanded = () => {
             const uuidToId = new Map<number, number>();
@@ -531,6 +539,7 @@ export class HSLayer {
         this.survivalAccess?.checkScope(this.hilbertSystem.saveContext().activeProp);
     }
     configureSurvival(rewards: Iterable<string>) {
+        this.assistantPanel?.reset();
         this.survivalAccess = new SurvivalAccess();
         this.lastGateAST = null;
         clearCommands();
@@ -851,6 +860,10 @@ export class HSLayer {
             this.propListView.refresh();
         });
     }
+    private addRecordedRule(name: string) {
+        const list = this.activeRuleFolder?.children ?? this.ruleList;
+        list.push({ name, uuid: 0 });
+    }
     unlockBasicRuleCmd(command?: "m" | "hyp" | "mcpt" | "mcnt") {
         if (!command || command === "m") defineCommand('m', (args: AST[]) => {
             if (args.length === 0) {
@@ -877,9 +890,7 @@ export class HSLayer {
             if (!args[0]) throw HSError.emptyValue;
             this.hilbertSystem.m(args[0].name);
             // 新规则添加到活动文件夹末尾（无活动则为根目录末尾）
-            const node = { name: args[0].name, uuid: 0 };
-            if (this.activeRuleFolder) this.activeRuleFolder.children!.push(node);
-            else this.ruleList.push(node);
+            this.addRecordedRule(args[0].name);
             this.propListView.refresh();
             this.ruleListView.refresh();
         });
@@ -1278,5 +1289,9 @@ export class HSLayer {
         this.ruleListView.refresh();
     }
     serialize() { return this.serde.serialize() }
-    deserialize(data: any, builtinRules?: string) { this.navigator.close(); return this.serde.deserialize(data, builtinRules) }
+    deserialize(data: any, builtinRules?: string) {
+        this.navigator.close();
+        this.assistantPanel?.reset();
+        return this.serde.deserialize(data, builtinRules);
+    }
 }

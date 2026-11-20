@@ -1873,14 +1873,49 @@ export class HilbertSystem {
         };
         iterFlat(steps);
         const oldNew = new Map();
-        // a（断言）跳过；无条件规则的 step 无 h；其余逐条重放，锚定 var 文件夹（当前 active）
+        // Append all top-level steps at the original anchor, even after a
+        // preceding step opened a logical folder.
+        const anchor = this.activeProp;
         for (const sp of flat) {
             if (sp.from.type === "a")
                 continue;
-            const desiredParent = sp.parent ? (oldNew.get(sp.parent) ?? this.activeProp) : this.activeProp;
+            const desiredParent = sp.parent ? (oldNew.get(sp.parent) ?? anchor) : anchor;
             while (this.activeProp && this.activeProp !== desiredParent)
                 this.pop();
             this.replayStepProp(sp, {}, oldNew);
+        }
+    }
+    // Append a standalone checked proof without replacing the sheet's objects
+    // or leaving a partial append when the destination has incompatible scope.
+    appendProof(steps, conclusion) {
+        const list = this.getActiveList();
+        const length = list.length;
+        const anchor = this.activeProp;
+        const replvars = new Map(this.replvars);
+        const replvarVars = new Set(this.replvarVars);
+        const rules = new Map(this.rules);
+        try {
+            this.replaySteps(steps);
+            const last = this.getLastChildP(anchor);
+            if (!last || !this.ref_addCaptureScopeToAST(last.ast, this.captureScope(anchor, last)).equal(conclusion)) {
+                throw HSError.conclusionMismatch;
+            }
+        }
+        catch (error) {
+            list.length = length;
+            this.replvars = replvars;
+            this.replvarVars = replvarVars;
+            for (const key of this.rules.keys())
+                if (!rules.has(key))
+                    this.rules.delete(key);
+            this.updatePropIdx();
+            throw error;
+        }
+        finally {
+            if (anchor)
+                this.cd(anchor);
+            else
+                this.clearActiveDir();
         }
     }
 }

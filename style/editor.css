@@ -72,3 +72,36 @@ span, span.ast {
   white-space: inherit;
   word-wrap: inherit;
 }
+
+.hs-assistant {
+  padding: .65rem 1rem;
+  overflow-wrap: anywhere;
+}
+.hs-assistant summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.hs-assistant form:not([hidden]) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: .5rem;
+}
+.hs-assistant input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font: inherit;
+}
+.hs-assistant ol:empty {
+  display: none;
+}
+.hs-assistant [aria-current="step"] > code {
+  font-weight: 700;
+}
+.hs-assistant-help {
+  font-size: .85em;
+}
+.hs-assistant-error {
+  color: var(--theme-danger, #b32020);
+}
