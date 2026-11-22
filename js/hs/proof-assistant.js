@@ -576,17 +576,45 @@ export class HilbertProofAssistant {
                 return fail("An argument could not be inferred; supply it or prove a premise first.");
             return result;
         };
+        const replacementsFor = (d, source) => Object.fromEntries(d.replaceNames.map(([key]) => {
+            const slot = source.slots.get(key);
+            if (!slot)
+                return fail("The rule changed while the proof was open.");
+            return [key, materialize(slot)];
+        }));
         const use = (source, premises) => {
             if (source.kind === "binding")
                 return references.get(source.id) ?? fail("Proof binding is not available here.");
             const d = rule(source.name);
-            const replacements = Object.fromEntries(d.replaceNames.map(([key]) => {
-                const slot = source.slots.get(key);
-                if (!slot)
-                    return fail("The rule changed while the proof was open.");
-                return [key, materialize(slot)];
-            }));
-            return scratch.d(d, premises ?? source.inputs.map(p => use(p)), replacements);
+            return scratch.d(d, premises ?? source.inputs.map(p => use(p)), replacementsFor(d, source));
+        };
+        const directRewrite = (goal, child, { source, reverse, pattern }) => {
+            if (source.kind !== "rule" || (pattern && pattern.isAtom() !== "#"))
+                return undefined;
+            const d = rule(source.name);
+            if (d.error || d.conditions.length || d.assertions.length ||
+                d.conclusion.type !== NodeType.LOGIC || d.conclusion.name !== "<>")
+                return undefined;
+            const from = reverse ? 1 : 0;
+            const replacements = replacementsFor(d, source);
+            const relation = d.conclusion.clone().mut_replaceByMatchTable(replacements);
+            const target = reduceSubstitution(materialize(goal.target));
+            const rewritten = reduceSubstitution(materialize(child.target));
+            if (!target.equal(relation.nodes[from]) || !rewritten.equal(relation.nodes[1 - from]))
+                return undefined;
+            // The reverse template must determine the same full instantiation,
+            // or the compact step would not expand to the checked rewrite.
+            try {
+                const inferred = rewritten.match(d.conclusion.nodes[1 - from]);
+                if (!d.replaceNames.every(([key]) => inferred[key]?.equal(replacements[key])))
+                    return undefined;
+            }
+            catch (error) {
+                if (isHSErrorInfo(error))
+                    return undefined;
+                throw error;
+            }
+            return new AST(NodeType.NODE_DNAME, "", new AST(NodeType.ATOM_DNAME, reverse ? "msbt>" : "msbt<"), source.name.clone());
         };
         const rewriteArrow = (goal, { source, reverse, pattern }) => {
             const target = reduceSubstitution(materialize(goal.target));
@@ -688,10 +716,19 @@ export class HilbertProofAssistant {
                     break;
                 }
                 case "rewrite": {
-                    const { arrow } = rewriteArrow(goal, action.rewrite);
+                    const direct = directRewrite(goal, action.child, action.rewrite);
+                    const arrow = direct ? undefined : rewriteArrow(goal, action.rewrite).arrow;
                     const premise = visit(action.child);
-                    if (premise)
-                        proof = mp(arrow, premise);
+                    if (!premise)
+                        return undefined;
+                    if (direct && (premise.from.type === "d" || premise.from.type === "h") && premise.ast.equal(inScope(premise))) {
+                        this.access?.checkRuleName(direct, scratch);
+                        this.access?.checkScope(active());
+                        // The root is the first match. Leave any nested matches untouched.
+                        proof = scratch.msbt([direct, new AST(NodeType.ATOM_ITEM, String(premise.id)), new AST(NodeType.ATOM_ITEM, "1")]);
+                    }
+                    else
+                        proof = mp(arrow ?? rewriteArrow(goal, action.rewrite).arrow, premise);
                     break;
                 }
                 case "apply": {

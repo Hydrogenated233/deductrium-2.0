@@ -330,6 +330,50 @@ test('biconditional rw records msbt in either direction and expands to the recor
     }
 });
 
+test('whole-goal rewrites emit one expandable metatheorem step after the rewritten proof', () => {
+    const hs = creative();
+    const access = new SurvivalAccess(new Set(['mifft', 'macro']));
+    for (const { target, tactics, name, commands, arg, expanded } of [
+        {
+            target: '$∨¬$', tactics: ['rw d\\/', 'exact .i'], name: 'sCompact',
+            commands: ['.i ¬$', 'msbt<(d\\/) 1 0'], arg: '¬P→Q', expanded: '(¬P→Q)∨¬(¬P→Q)',
+        },
+        {
+            target: '¬$→¬$', tactics: ['rwb d\\/ #', 'exact sCompact'], name: 'sReverse',
+            commands: ['sCompact $', 'msbt>(d\\/) 1 0'], arg: 'P∨Q', expanded: '¬(P∨Q)→¬(P∨Q)',
+        },
+    ]) {
+        const a = new HilbertProofAssistant(hs, target, access);
+        run(a, ...tactics);
+        a.qed(name);
+        assert.deepEqual(hs.genCmd(), commands);
+        hs.clear();
+        hs.fromCmd(commands.map(cmd => parse(cmd, 'cmd')));
+        hs.expand(hs.props.at(-1));
+        assert.ok(conclusion(hs).equal(parse(target)));
+        hs.clear();
+        // The argument adds nested matches. Replay must keep selecting only the root.
+        hs.fromCmd([parse(`${name} (${arg})`, 'cmd')]);
+        hs.expand(hs.props.at(-1));
+        assert.equal(hs.genCmd().at(-1), commands.at(-1).replace(/ 0$/, ' 1'));
+        hs.expand(hs.props.at(-1));
+        assert.ok(conclusion(hs).equal(parse(expanded)));
+        hs.clear();
+    }
+});
+
+test('whole-goal rw keeps the explicit rule instance when the reverse match loses an argument', () => {
+    const hs = creative();
+    const name = 'sForget';
+    hs.rules.set(name, new Deduction(new Set(), parse(name, 'dname'), [], [], parse('($A→$A)↔($B→$B)')));
+    const target = '$p→$p';
+    const a = new HilbertProofAssistant(hs, target);
+    run(a, 'rw sForget $p $q', 'exact .i');
+    a.qed();
+    assert.equal(hs.genCmd()[0], 'sForget $p $q');
+    assert.ok(conclusion(hs).equal(parse(target)));
+});
+
 test('rw infers omitted WFF arguments and accepts explicit rule arguments', () => {
     for (const [tactic, goal, expected] of [
         ['rw d\\/', '$∨¬$', '¬$→¬$'],

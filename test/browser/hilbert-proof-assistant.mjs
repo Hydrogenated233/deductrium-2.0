@@ -237,6 +237,17 @@ try {
                 if (!hs.checkConclusionInPropList().conclusion.equal(root)) throw new Error('Sheet conclusion changed after loading.');
                 if (!hs.rules.get('sAssistant')?.step?.length) throw new Error('Macro did not survive loading.');
             }, statement);
+            await page.locator('.sheet-tab-add').click();
+            await start('$∨¬$');
+            await tactic('rw d\\/');
+            assert.equal(await currentFormula.textContent(), '¬$→¬$');
+            await tactic('exact .i');
+            await tactic('qed');
+            assert.equal(await target.isVisible(), true);
+            assert.equal(await status.isVisible(), false);
+            const recorded = await page.evaluate(() => window.game.hsLayer.hilbertSystem.genCmd());
+            assert.deepEqual(recorded, ['.i ¬$', 'msbt<(d\\/) 1 0']);
+
             assert.deepEqual(errors, []);
             console.log(`Proof assistant passed at ${viewport.width}×${viewport.height}`);
         } finally { await context.close(); }
