@@ -1,0 +1,46 @@
+name: Deploy branch selector to Pages
+
+on:
+  push:
+    branches: [main]
+  delete:
+  workflow_dispatch:
+  schedule:
+    # Branches without this workflow are picked up by the hourly refresh.
+    - cron: '23 * * * *'
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'delete' || github.event.ref_type == 'branch')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/configure-pages@v6
+      - name: Build static branch previews
+        run: python3 tools/build-pages.py _site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deploy
