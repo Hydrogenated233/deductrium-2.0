@@ -135,6 +135,15 @@ function rewriteIndices(system: HilbertSystem, relation: AST, reverse: boolean, 
     return new AST(NodeType.FN, "{}", ...selected);
 }
 
+// Without a frame, try the whole goal first and then its subexpressions.
+// With a frame, only the expressions at its # placeholders can provide arguments.
+function* rewriteCandidates(target: AST, frame?: AST): Generator<AST> {
+    if (frame?.isAtom() === "#") { yield target; return; }
+    if (!frame) yield target;
+    else if (frame.type !== target.type || frame.name !== target.name || frame.nodes.length !== target.nodes.length) return;
+    for (const [i, child] of target.nodes.entries()) yield* rewriteCandidates(child, frame?.nodes[i]);
+}
+
 interface Binding { id: number; formula: AST }
 interface Goal {
     id: number;
@@ -198,7 +207,10 @@ export class HilbertProofAssistant {
                     : action.kind === "apply" ? action.children
                     : action.kind === "intro" || action.kind === "rewrite" ? [action.child]
                     : action.kind === "let" ? [action.next] : [];
-                return { goal, text, children: children.map(child => child.id) };
+                return {
+                    goal, text, children: children.map(child => child.id),
+                    quantifierIntro: action.kind === "intro" && action.folder === "v",
+                };
             }),
             goals: this.draft.pending.map(goal => ({
                 id: goal.id,
@@ -309,11 +321,11 @@ export class HilbertProofAssistant {
             if (!match) return fail("Use let name := source.");
             const [, name, text] = match;
             this.checkFresh(name, current);
-            const expression = this.source(text, current, draft, false);
+            const expression = this.source(text, current, draft, "exact");
             const next = subgoal(current.target, withBinding(name, current.id, expression.conclusion));
             set({ kind: "let", source: expression.source, next }, next);
         } else if (command === "exact" || command === "apply") {
-            const expression = this.source(argument, current, draft, command === "apply");
+            const expression = this.source(argument, current, draft, command);
             if (command === "exact") {
                 unify(target, expression.conclusion, draft.values);
                 set({ kind: "exact", source: expression.source });
@@ -339,15 +351,11 @@ export class HilbertProofAssistant {
                 set({ kind: "apply", source: expression.source, children, rulePremiseCount: expression.premises.length }, ...children);
             }
         } else if (command === "rw" || command === "rwb") {
-            const [, name, pattern] = /^(\S+)(?:\s+(.+))?$/.exec(argument) ?? [];
-            if (!name) return fail(`Use ${command} h [pattern].`);
-            const { source } = this.source(name, current, draft, false);
-            const rewrite = { source, reverse: command === "rwb", pattern: pattern ?
-                renameFreeItems(this.parseFormula(pattern), current.variables) : undefined };
-            // Visit the focused goal in the same scope as qed; the kernel
-            // produces the implication before we publish the new goal.
-            const { rewriteTarget } = this.compile(draft, { id: current.id, rewrite });
-            if (!rewriteTarget) return fail("The rewrite needs its proof and goal to be determined.");
+            if (!argument) return fail(`Use ${command} source [rule arguments] [pattern].`);
+            const { text, pattern } = this.rewriteOperands(argument, current);
+            const { source, conclusion } = this.source(text, current, draft, "rewrite");
+            const rewrite = { source, reverse: command === "rwb", pattern };
+            const rewriteTarget = this.prepareRewrite(draft, current, target, rewrite, conclusion);
             const child = subgoal(rewriteTarget);
             set({ kind: "rewrite", rewrite, child }, child);
             return draft;
@@ -395,7 +403,7 @@ export class HilbertProofAssistant {
         return reduceSubstitution(goal ? renameFreeItems(ast, goal.variables) : ast);
     }
 
-    private source(text: string, goal: Goal, draft: Draft, apply: boolean) {
+    private source(text: string, goal: Goal, draft: Draft, mode: "exact" | "apply" | "rewrite") {
         const binding = goal.bindings.get(text);
         if (binding) return {
             source: { kind: "binding", id: binding.id } as Source, premises: [], conclusion: binding.formula,
@@ -418,7 +426,7 @@ export class HilbertProofAssistant {
         const instance = (ast: AST) => ast.clone().mut_replaceByMatchTable(Object.fromEntries(slots));
         const premises = rule.conditions.map(instance);
         const inputs: Source[] = [];
-        if (!apply) {
+        if (mode !== "apply") {
             if (args.length < premises.length) return fail("Pass each premise by its context name, or use apply.");
             premises.forEach((formula, i) => {
                 const arg = args.shift()!;
@@ -432,13 +440,66 @@ export class HilbertProofAssistant {
         args.forEach((arg, i) => {
             const [key, item] = rule.replaceNames[i];
             const part = text.slice(arg.start! - 2, arg.end! - 2);
+            if (mode === "rewrite" && part === "_") return;
             const parsed = this.parser.parse(part, item ? "item" : "wff");
             if (!parsed || parsed.end !== part.length) return fail(`Invalid argument for ${key}.`);
             unify(slots.get(key)!, renameFreeItems(parsed, goal.variables), draft.values);
         });
         return {
-            source: { kind: "rule", name, slots, inputs } as Source, premises: apply ? premises : [], conclusion: instance(rule.conclusion),
+            source: { kind: "rule", name, slots, inputs } as Source, premises: mode === "apply" ? premises : [], conclusion: instance(rule.conclusion),
         };
+    }
+
+    private rewriteOperands(argument: string, goal: Goal) {
+        const [name] = argument.split(/\s+/, 1);
+        if (goal.bindings.has(name) || goal.variables.has(name)) {
+            const frame = argument.slice(name.length).trim();
+            return { text: name, pattern: frame ? renameFreeItems(this.parseFormula(frame), goal.variables) : undefined };
+        }
+        const cmd = this.parser.parse(`d ${argument}`, "cmd");
+        if (!cmd || cmd.end !== argument.length + 2) return fail("Expected a rule expression and optional rewrite pattern.");
+        const last = cmd.nodes.length > 1 ? cmd.nodes.at(-1) : undefined;
+        if (!last?.getLocalvars().has("#")) return { text: argument };
+        const offset = last.start! - 2;
+        return {
+            text: argument.slice(0, offset).trimEnd(),
+            pattern: renameFreeItems(this.parseFormula(argument.slice(offset)), goal.variables),
+        };
+    }
+
+    private prepareRewrite(draft: Draft, goal: Goal, target: AST, rewrite: Rewrite, conclusion: AST): AST {
+        const check = (state: Draft) => {
+            // Probe in the same proof scope as qed, without publishing a goal or a proof step.
+            const { rewriteTarget } = this.compile(state, { id: goal.id, rewrite });
+            return rewriteTarget ?? fail("The rewrite needs its proof and goal to be determined.");
+        };
+        const { source, reverse, pattern } = rewrite;
+        if (source.kind === "binding") return check(draft);
+        const slots = [...source.slots.values()];
+        const missing = (state: Draft) => slots.some(slot => hasHole(resolve(slot, state.values)));
+        if (!missing(draft)) return check(draft);
+        if (hasHole(target)) return fail("The rewrite needs a determined goal.");
+        const relation = resolveFormula(conclusion, draft.values);
+        if (!(relation.type === NodeType.PRED && relation.name === "=") &&
+            !(relation.type === NodeType.LOGIC && relation.name === "<>")) {
+            return fail("Rewrite needs a proof of an equality or equivalence.");
+        }
+        const from = relation.nodes[reverse ? 1 : 0];
+        let missingArguments = false;
+        let rejected: { error: unknown } | undefined;
+        for (const candidate of rewriteCandidates(target, pattern)) {
+            const trial = { ...draft, values: new Map(draft.values) };
+            try { unify(from, candidate, trial.values); } catch { continue; }
+            if (missing(trial)) { missingArguments = true; continue; }
+            try {
+                const rewritten = check(trial);
+                draft.values = trial.values;
+                return rewritten;
+            } catch (error) { rejected ??= { error }; }
+        }
+        if (rejected) throw rejected.error;
+        if (missingArguments) return fail("Could not infer all rule arguments for rewrite; supply the remaining rule arguments explicitly.");
+        return fail("No eligible occurrence to rewrite.");
     }
 
     private scratch() {

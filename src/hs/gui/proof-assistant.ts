@@ -6,7 +6,7 @@ import { isHSErrorInfo } from "../core/error.js";
 import { HSParser } from "../core/parser.js";
 import { HilbertProofAssistant } from "../proof-assistant.js";
 
-type InputMode = "wff" | "tactic";
+type InputMode = "wff" | "tactic" | "quantifier-intro";
 
 // Keep tactic keywords and names literal. Formula and rule operands use the
 // same tokenizer, symbol replacements and binding highlights as the command bar.
@@ -15,6 +15,8 @@ class ProofInputParser implements IParser {
     private tokens: Token[] = [];
     readonly inputReplacements = this.hs.inputReplacements;
     allowReplaceTokenType = this.hs.allowReplaceTokenType;
+    constructor(private readonly boundNames?: ReadonlySet<string>) {}
+
     getTokens() { return this.tokens; }
 
     parse(text: string, mode: InputMode) {
@@ -31,7 +33,10 @@ class ProofInputParser implements IParser {
             for (const token of this.hs.getTokens()) {
                 if (token.start < offset) continue;
                 literal(end, token.start);
-                this.tokens.push(token);
+                // Opened quantifiers still bind these item variables in the proof context.
+                const bound = this.boundNames?.has(token.text) &&
+                    ["atom-free-var", "atom-locvar", "replvar-item", "replvar-var"].includes(token.type);
+                this.tokens.push(bound ? { ...token, type: "atom-var" } : token);
                 end = token.end;
             }
             // Formula tokenization stops at a command separator. Keep the
@@ -56,16 +61,10 @@ class ProofInputParser implements IParser {
             offset += name[0].length;
             return operand(offset, command === "goal" ? "wff" : "cmd")!;
         }
-        if (command === "rw" || command === "rwb") {
-            const name = /^\S+\s*/.exec(text.slice(offset));
-            if (name) {
-                const patternOffset = offset + name[0].length;
-                operand(offset, "cmd", patternOffset);
-                return operand(patternOffset, "wff")!;
-            }
+        if (command === "exact" || command === "apply" || command === "rw" || command === "rwb") {
+            return operand(offset, "cmd")!;
         }
-        if (command === "exact" || command === "apply") return operand(offset, "cmd")!;
-        literal(offset, text.length);
+        literal(offset, text.length, mode === "quantifier-intro" && command === "intro" ? "atom-var" : "cmd-atom-param");
         return null!;
     }
 }
@@ -80,9 +79,9 @@ function editor(mount: HTMLElement, mode: InputMode, id: string) {
     return view;
 }
 
-function syntax(text: string, mode: InputMode) {
+function syntax(text: string, mode: InputMode, boundNames?: ReadonlySet<string>) {
     const span = document.createElement("span");
-    new SyntaxViewer(span, new ProofInputParser(), text, mode);
+    new SyntaxViewer(span, new ProofInputParser(boundNames), text, mode);
     return span;
 }
 
@@ -211,9 +210,9 @@ export class ProofAssistantPanel<Sheet extends object> {
         if (!assistant) return;
 
         const state = assistant.snapshot();
-        for (const { text } of state.history) {
+        for (const { text, quantifierIntro } of state.history) {
             const line = document.createElement("div");
-            line.append(syntax(text, "tactic"), " . ");
+            line.append(syntax(text, quantifierIntro ? "quantifier-intro" : "tactic"), " . ");
             this.history.append(line);
         }
         const localized = (key: "hsAssistantCurrent" | "hsAssistantReady" | "hsAssistantGoal") => {
@@ -225,17 +224,24 @@ export class ProofAssistantPanel<Sheet extends object> {
         if (!state.goals.length) this.goals.append(localized("hsAssistantReady"));
         for (let i = state.goals.length - 1; i >= 0; i--) {
             const { context, target } = state.goals[i];
+            const boundNames = new Set(context.filter(entry => entry.formula === null).map(entry => entry.name));
             const line = document.createElement("div");
             line.className = i ? "hs-assistant-goal-pending" : "hs-assistant-goal-current";
             for (const { name, formula } of [...context].reverse()) {
-                line.append(syntax(name, "wff"));
-                if (formula !== null) line.append(" : ", syntax(formula, "wff"));
+                if (formula === null) {
+                    const variable = document.createElement("span");
+                    variable.className = "token-atom-var";
+                    variable.textContent = name;
+                    line.append(variable);
+                } else {
+                    line.append(syntax(name, "wff"), " : ", syntax(formula, "wff", boundNames));
+                }
                 line.append(document.createElement("br"));
             }
             line.append(document.createElement("br"));
             line.append(localized(i ? "hsAssistantGoal" : "hsAssistantCurrent"));
             if (i) line.append(`${i}：`);
-            line.append(syntax(target, "wff"));
+            line.append(syntax(target, "wff", boundNames));
             this.goals.append(document.createElement("hr"), line);
         }
         for (const text of assistant.recommendations()) {

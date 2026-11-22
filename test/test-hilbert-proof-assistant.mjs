@@ -330,6 +330,52 @@ test('biconditional rw records msbt in either direction and expands to the recor
     }
 });
 
+test('rw infers omitted WFF arguments and accepts explicit rule arguments', () => {
+    for (const [tactic, goal, expected] of [
+        ['rw d\\/', '$∨¬$', '¬$→¬$'],
+        ['rw d\\/ $', '$∨¬$', '¬$→¬$'],
+        ['rw d\\/ $ ¬$', '$∨¬$', '¬$→¬$'],
+        ['rwb d\\/', '¬$→¬$', '$∨¬$'],
+        ['rw d\\/', '(P∨Q)∧(P∨Q)', '(¬P→Q)∧(¬P→Q)'],
+        ['rw d\\/', '(P∨Q)∧(R∨S)', '(¬P→Q)∧(R∨S)'],
+        ['rw d\\/ ((P∨Q)∧#)', '(P∨Q)∧(R∨S)', '(P∨Q)∧(¬R→S)'],
+        ['rw d\\/ R S ((P∨Q)∧#)', '(P∨Q)∧(R∨S)', '(P∨Q)∧(¬R→S)'],
+    ]) {
+        const hs = creative();
+        const original = `(${expected})→(${goal})`;
+        const a = new HilbertProofAssistant(hs, original);
+        run(a, 'intro h');
+        const before = a.snapshot();
+        run(a, tactic);
+        assert.deepEqual(open(a), [parse(expected).toString()], tactic);
+        assert.equal(a.undo(), true);
+        assert.deepEqual(a.snapshot(), before);
+        run(a, tactic, 'exact h');
+        a.qed('sRuleRewrite');
+        const commands = hs.genCmd();
+        hs.clear();
+        hs.fromCmd(commands.map(command => parse(command, 'cmd')));
+        assert.ok(conclusion(hs).equal(parse(original)), tactic);
+        hs.clear();
+        hs.fromCmd([parse('sRuleRewrite', 'cmd')]);
+        hs.expand(hs.props[0]);
+        assert.ok(conclusion(hs).equal(parse(original)), tactic);
+    }
+});
+
+test('rw keeps the current goal when a rule argument cannot be inferred', () => {
+    const hs = creative();
+    hs.rules.set('sNeedsArgument', new Deduction(new Set(), parse('sNeedsArgument', 'dname'), [], [], parse('($p∨¬$p)↔($q∨¬$q)')));
+    const a = new HilbertProofAssistant(hs, 'P∨¬P');
+    const before = a.snapshot();
+    assert.throws(() => a.execute('rw sNeedsArgument'), /supply.*rule arguments/i);
+    assert.deepEqual(a.snapshot(), before);
+    assert.throws(() => a.execute('rw sNeedsArgument Q R'), e => e.type === 'msbtNoMatch');
+    assert.deepEqual(a.snapshot(), before);
+    run(a, 'rw sNeedsArgument _ Q');
+    assert.deepEqual(open(a), ['Q∨¬Q']);
+});
+
 test('reverse msbt expands formula and proof-step targets in the recorded direction', () => {
     const hs = creative();
     for (const [commands, expected] of [

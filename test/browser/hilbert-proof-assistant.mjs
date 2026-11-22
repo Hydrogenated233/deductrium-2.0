@@ -106,6 +106,43 @@ try {
             assert.equal(await goals.textContent(), '无目标，请输入qed结束');
             await cancel.click();
 
+            for (const rule of ['rw d\\/', 'rw d\\/ $ ~$']) {
+                await start('$∨¬$');
+                await input.pressSequentially(rule);
+                assert.equal(await tacticPaint.locator('.token-rule-def').textContent(), 'd\\/');
+                if (rule.includes('~')) assert.equal(await input.inputValue(), 'rw d\\/ $ ¬$');
+                await input.press('Enter');
+                assert.equal(await status.isVisible(), false);
+                assert.equal(await currentFormula.textContent(), '¬$→¬$');
+                await undo.click();
+                assert.equal(await currentFormula.textContent(), '$∨¬$');
+                await cancel.click();
+            }
+
+            await start('∀x:x=y');
+            const boundColor = await color(currentFormula.locator('.token-atom-var').last());
+            const freeColor = await color(currentFormula.locator('.token-atom-free-var'));
+            assert.notEqual(boundColor, freeColor);
+            await tactic('intro x');
+            assert.deepEqual(await currentFormula.locator('.token-atom-var').allTextContents(), ['x']);
+            assert.equal(await color(currentFormula.locator('.token-atom-var')), boundColor);
+            assert.equal(await color(currentFormula.locator('.token-atom-free-var')), freeColor);
+            assert.deepEqual(await current.locator(':scope > .token-atom-var').allTextContents(), ['x']);
+            assert.equal(await color(history.last().locator('.token-atom-var')), boundColor);
+            await undo.click();
+            assert.equal(await currentFormula.textContent(), '∀x:x=y');
+            assert.equal(await current.locator(':scope > .token-atom-var').count(), 0);
+            await cancel.click();
+
+            await start('∀x:(x=y→x=y)');
+            await tactic('intro $z');
+            await tactic('intro h');
+            assert.deepEqual(await current.locator('.token-atom-var').allTextContents(), ['$z', '$z', '$z']);
+            assert.deepEqual(await current.locator('.token-atom-free-var').allTextContents(), ['h', 'y', 'y']);
+            assert.deepEqual(await history.first().locator('.token-atom-var').allTextContents(), ['$z']);
+            assert.equal(await history.last().locator('.token-atom-var').count(), 0);
+            await cancel.click();
+
             await start('a=b→b=a→a=a');
             await tactic('intro h');
             await tactic('intro p');
