@@ -1015,7 +1015,8 @@ export class MSBT {
         const eqIdx = this.genStepIter(originAst, replacedAst, []);
         if (!targetIsStep)
             return this.steps;
-        this.steps.push(`d <<.<>${this.right ? 1 : 2} ${eqIdx} ${preloadedCount}`);
+        // genStepIter always proves old ↔ new, even for a reverse rewrite.
+        this.steps.push(`d <<.<>1 ${eqIdx} ${preloadedCount}`);
         return this.steps;
     }
     findAt(ast, pos) {
@@ -1158,7 +1159,11 @@ export class MSBT {
                 if (!this.templateProp)
                     throw HSError.msbtNoMatch;
                 // 模板步骤 hyp 在生成上下文中位于预置断言之后（assertCount+1）
-                return this.assertCount + 1;
+                const templateIdx = this.assertCount + 1;
+                if (this.right)
+                    return templateIdx;
+                this.steps.push(`d .<>s ${templateIdx}`);
+                return this.assertCount + this.steps.length - 1 - this.popCount;
             }
             // 否则是规则生成、匹配的
             // MCPT 没有 Deduction 实体，直接生成重言式证明命令。
@@ -1174,6 +1179,8 @@ export class MSBT {
                     throw HSError.msbtNoMatch;
                 const dname = this.rule.name.toString();
                 this.steps.push(`d ${dname} ${values.join(" ")}`);
+                if (!this.right)
+                    this.steps.push(`d .<>s ${this.assertCount + this.steps.length - 1 - this.popCount}`);
             }
             else
                 throw "can't reach";

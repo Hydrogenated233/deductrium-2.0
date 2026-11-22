@@ -105,7 +105,12 @@ check('first order toolkit pulls only earned proof support', () => {
     assert(!quant.includes('a8'));
     const eq = names(get(rewards('.1st', 'a7', 'a8')));
     assert(eq.includes('.=s'));
+    assert(eq.includes('.a8='));
+    assert(!eq.includes('.a8<>'));
     assert(!eq.includes('a4'));
+    assert(!names(get(rewards('.1st', 'a8'))).includes('.a8='));
+    const iff = names(get(rewards('.1st', 'a7', 'a8', 'neg', 'iff')));
+    assert(iff.includes('.a8<>'));
 });
 
 const allRewards = rewards(...mappings.keys(), '.prop', '.1st', '.zfc');
@@ -114,7 +119,7 @@ check('all supported toolkits replay and MCPT support expands', () => {
     const macros = names(allText).filter(name => name.startsWith('.'));
     const logicText = initialCreativeRules.split('{ [zh]皮亚诺算数')[0];
     const creativeMacros = names(logicText.split('\n').map(s => s.trim()).filter(s => s && !/^[{}]/.test(s) && !/:\s*ax:/.test(s)).join('\n'));
-    assert.equal(macros.length, 41);
+    assert.equal(macros.length, 43);
     assert.deepEqual(new Set(macros), new Set(creativeMacros), 'no supported builtin proof may silently disappear');
     assert.equal(names(get(rewards('.prop', 'neg', 'iff', 'andor'))).filter(name => name.startsWith('.')).length, 37);
     assert(!names(allText).some(name => /^(an|dn)/.test(name)));

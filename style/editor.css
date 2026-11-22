@@ -74,34 +74,63 @@ span, span.ast {
 }
 
 .hs-assistant {
-  padding: .65rem 1rem;
   overflow-wrap: anywhere;
+  margin: .5em .75em 1em;
 }
-.hs-assistant summary {
-  cursor: pointer;
-  font-weight: 600;
+.hs-assistant-wrapper.list-wrapper {
+  margin-top: .5em;
+  min-height: 100px;
+  max-height: 300px;
+  border: solid;
+  user-select: text;
 }
-.hs-assistant form:not([hidden]) {
+.hs-assistant-heading {
+  line-height: 1.5;
+}
+.hs-assistant-modify {
+  border-radius: 4px;
+  border: 0;
+  background-color: #aaa;
+  color: white;
+  overflow: hidden;
+  margin-right: 1px;
+}
+.hs-assistant-modify:hover {
+  color: #8f0;
+}
+.hs-assistant-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: .5rem;
-  margin-top: .5rem;
 }
-.hs-assistant input {
-  flex: 1 1 12rem;
+.hs-assistant-input {
+  flex: 1;
   min-width: 0;
-  font: inherit;
+  height: 1.45em;
+  min-height: 26px;
 }
-.hs-assistant ol:empty {
-  display: none;
+.hs-assistant-input .editor-container {
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-radius: 3px;
 }
-.hs-assistant [aria-current="step"] > code {
-  font-weight: 700;
+.hs-assistant-input .editor-container:focus-within {
+  border-color: var(--theme-focus, currentColor);
 }
-.hs-assistant-help {
-  font-size: .85em;
+.hs-assistant-input .editor-textarea,
+.hs-assistant-input .editor-pre {
+  padding: 0 3px;
+  white-space: pre;
+  overflow: hidden;
+  line-height: 1.35;
 }
-.hs-assistant-error {
-  color: var(--theme-danger, #b32020);
+.hs-assistant-input .editor-pre {
+  background: transparent;
 }
+.hs-assistant-goal-pending {
+  opacity: .5;
+  background: #ddd;
+}
+html[data-theme="dark"] .hs-assistant-goal-pending {
+  background: var(--theme-inset);
+}
+.hs-assistant-error { color: var(--theme-danger, red); }

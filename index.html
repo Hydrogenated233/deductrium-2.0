@@ -67,27 +67,27 @@
             </div>
             <div class="sheet-tabs" id="propSheetTabs"></div>
         </div>
-        <details class="manager-card hs-assistant" id="hs-assistant">
-            <summary data-i18n="hsAssistant">证明助手</summary>
-            <form id="hs-assistant-start">
-                <label for="hs-assistant-target" data-i18n="hsAssistantTarget">目标公式</label>
-                <input id="hs-assistant-target" autocomplete="off" spellcheck="false" required>
-                <button class="btn-sm primary" data-i18n="hsAssistantStart">开始证明</button>
-            </form>
-            <div id="hs-assistant-draft" hidden>
-                <p id="hs-assistant-statement"></p>
-                <ol id="hs-assistant-goals" aria-live="polite"></ol>
-                <p id="hs-assistant-ready" data-i18n="hsAssistantReady" hidden>目标已完成，输入 qed 或 qed 名称。</p>
-                <form id="hs-assistant-command">
-                    <label for="hs-assistant-tactic" data-i18n="hsAssistantTactic">策略</label>
-                    <input id="hs-assistant-tactic" autocomplete="off" spellcheck="false" required>
-                    <button class="btn-sm primary" data-i18n="hsAssistantRun">执行</button>
-                    <button class="btn-sm" type="button" id="hs-assistant-cancel" data-i18n="hsAssistantCancel">取消证明</button>
-                </form>
-                <p class="hs-assistant-help"><code>intro name · exact source · apply source · goal name : formula · let name := source · qed [name]</code></p>
+        <div class="hs-assistant" id="hs-assistant">
+            <div class="hs-assistant-heading">
+                <label id="hs-assistant-label" for="hs-assistant-target" data-i18n="hsAssistant">证明策略：</label><button class="hs-assistant-modify" id="hs-assistant-cancel" type="button" hidden>x</button>
             </div>
-            <p id="hs-assistant-status" role="status" hidden></p>
-        </details>
+            <div class="list-wrapper hs-assistant-wrapper">
+                <div id="hs-assistant-draft" hidden>
+                    <div id="hs-assistant-history"></div>
+                    <div id="hs-assistant-goals" aria-live="polite"></div>
+                </div>
+                <form id="hs-assistant-form" class="hs-assistant-row">
+                    <button class="hs-assistant-modify" id="hs-assistant-undo" type="button" hidden>-</button><button class="hs-assistant-modify" id="hs-assistant-add" type="submit">+</button>
+                    <div class="hs-assistant-input" id="hs-assistant-target-editor"></div>
+                    <div class="hs-assistant-input" id="hs-assistant-tactic-editor" hidden></div>
+                </form>
+                <div id="hs-assistant-status" class="hs-assistant-error" role="alert" hidden></div>
+                <div id="hs-assistant-recommendations" hidden>
+                    <span data-i18n="hsAssistantRecommendations">推荐策略：</span><br>
+                    <span id="hs-assistant-recommendation-buttons"></span>
+                </div>
+            </div>
+        </div>
         <div class="cmd-footer" id="cmdFooter" style="height:150px;">
             <div class="resize-handle" id="cmdResizeHandle"></div>
             <div class="cmd-content">

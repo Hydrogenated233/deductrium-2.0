@@ -532,6 +532,7 @@ export class SyntaxEditor extends BaseSyntaxViewer {
     textarea;
     triggerReplaceChars;
     onEnter;
+    singleLine = false;
     constructor(mount, parser, initialValue, ...parserArgs) {
         // 创建 DOM 结构
         const container = document.createElement('div');
@@ -566,6 +567,9 @@ export class SyntaxEditor extends BaseSyntaxViewer {
         this.textarea.addEventListener('keydown', this.onKeyDown);
         // 初始内容
         this.setValue(initialValue);
+    }
+    get input() {
+        return this.textarea;
     }
     /** 获取 textarea 中的值（Unicode 文本） */
     getValue() {
@@ -623,7 +627,8 @@ export class SyntaxEditor extends BaseSyntaxViewer {
     };
     onPaste = (e) => {
         e.preventDefault();
-        const text = e.clipboardData?.getData('text/plain') ?? '';
+        const clipboardText = e.clipboardData?.getData('text/plain') ?? '';
+        const text = this.singleLine ? clipboardText.replace(/[\r\n]+/g, ' ') : clipboardText;
         const ta = this.textarea;
         const start = ta.selectionStart;
         const end = ta.selectionEnd;
@@ -631,12 +636,13 @@ export class SyntaxEditor extends BaseSyntaxViewer {
         ta.selectionStart = ta.selectionEnd = start + text.length;
         this.onInput();
     };
-    onInput = () => {
+    onInput = (event) => {
         const ta = this.textarea;
         let val = ta.value;
         const cursor = ta.selectionStart;
         const lastChar = val[cursor - 1] || '';
-        if (this.triggerReplaceChars?.has(lastChar)) {
+        const composing = event instanceof InputEvent && event.isComposing;
+        if (!composing && (this.singleLine || this.triggerReplaceChars.has(lastChar))) {
             const replaced = this.replaceText(val);
             if (replaced !== val) {
                 const prefixOld = val.substring(0, cursor);
@@ -649,12 +655,14 @@ export class SyntaxEditor extends BaseSyntaxViewer {
         this.render(ta.value);
     };
     onKeyDown = (e) => {
-        if (e.key !== 'Enter')
+        if (e.key !== 'Enter' || e.isComposing)
             return;
         // const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         // if (isTouchDevice) { return; }
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
+            if (this.singleLine)
+                return;
             document.execCommand('insertText', false, '\n');
         }
         else {

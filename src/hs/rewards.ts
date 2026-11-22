@@ -40,7 +40,7 @@ const toolkits: ReadonlyMap<string, readonly string[]> = new Map([
         "./\\", "./\\1", "./\\2", ".\\/1", ".\\/2", ".\\/n",
         ".<>r>", ".<>r~", ".<>r/\\", ".<>r\\/", ".<>r<>",
     ]],
-    [".1st", [".<>r\\a", ".=s", ".\\acn", ".\\acn<>"]],
+    [".1st", [".<>r\\a", ".=s", ".\\acn", ".\\acn<>", ".a8=", ".a8<>"]],
     // Old .zfc added simplified aliases only for axioms already earned.
     // Current builtins already use those forms and have no dot aliases.
     [".zfc", []],

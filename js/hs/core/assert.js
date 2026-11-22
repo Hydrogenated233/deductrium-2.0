@@ -647,7 +647,7 @@ export class Assertion {
             return;
         }
         // Match NFAssertion/OFAssertion scopes: the domain is outside the
-        // binder; only the image (RPL) or predicate (SEP) extends qs. Never
+        // binder; only the image (RPL) or predicate/body (SEP/BOUNDED_QUANT) extends qs. Never
         // substitute the binder declaration. qs both protects bound sources
         // and rejects free destination variables that would be captured.
         if (mut_body.type === NodeType.RPL) {
@@ -657,7 +657,7 @@ export class Assertion {
             this.reduceSbFnInside(premises, mut_body.nodes[0], src, dst, nqs);
             return;
         }
-        if (mut_body.type === NodeType.SEP) {
+        if (mut_body.type === NodeType.SEP || mut_body.type === NodeType.BOUNDED_QUANT) {
             this.reduceSbFnInside(premises, mut_body.nodes[1], src, dst, qs);
             const nqs = new Set(qs);
             nqs.add(mut_body.nodes[0].name);

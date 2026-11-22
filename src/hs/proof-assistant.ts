@@ -1,9 +1,11 @@
 import { NodeType } from "../asttype.js";
 import type { SurvivalAccess } from "./access.js";
-import { Assertion } from "./core/assert.js";
+import { Assertion, NFAssertion } from "./core/assert.js";
+import { MSBT } from "./core/combine.js";
 import { AST, type MatchTable } from "./core/ast.js";
 import { HilbertSystem } from "./core/core.js";
 import { type Deduction, type Proposition } from "./core/deduction.js";
+import { isHSErrorInfo } from "./core/error.js";
 import { HSParser } from "./core/parser.js";
 
 const namePattern = /^[a-z][A-Za-z0-9_]*$/;
@@ -26,6 +28,23 @@ function reduceSubstitution(ast: AST): AST {
     const reduced = ast.clone();
     Assertion.reduceSbFn([], reduced);
     return reduced;
+}
+
+function resolveFormula(ast: AST, values: ReadonlyMap<string, AST>): AST {
+    // Work on a resolved copy. Leave unresolved or unsafe substitutions for
+    // unification and kernel checking rather than guessing in a pending goal.
+    const reduce = (node: AST): AST => {
+        if (node.type !== NodeType.SB) {
+            node.nodes = node.nodes.map(reduce);
+            return node;
+        }
+        if (hasHole(node)) return node;
+        try { return reduceSubstitution(node); } catch (error) {
+            if (isHSErrorInfo(error) && error.type === "sbFail") return node;
+            throw error;
+        }
+    };
+    return reduce(resolve(ast, values));
 }
 
 function unify(left: AST, right: AST, values: Map<string, AST>) {
@@ -72,6 +91,50 @@ function renameFreeItems(ast: AST, aliases: ReadonlyMap<string, string>, bound =
     }));
 }
 
+// Build the formula template without abstracting bound occurrences or
+// creating a substitution that would capture a variable on either side.
+function equalityFrame(target: AST, from: AST, to: AST, hole: AST, system: HilbertSystem): AST {
+    const asserts = system.getAsserts();
+    const visit = (node: AST, bound: Set<string>): AST => {
+        if (node.equal(from) && [from, to].every(term =>
+            Assertion.check(asserts, new NFAssertion(term, bound, new Set()).reduce()).passed)) return hole.clone();
+        if (node.type === NodeType.SB) return node.clone(); // Opaque, still-schematic substitution.
+        const binder = node.getBoundVarName();
+        const declaration = node.type === NodeType.RPL ? 1 : 0;
+        const body = node.type === NodeType.RPL ? 0 : node.type === NodeType.SEP || node.type === NodeType.BOUNDED_QUANT ? 2 : 1;
+        return new AST(node.type, node.name, ...node.nodes.map((child, i) => {
+            if (binder === undefined) return visit(child, bound);
+            if (i === declaration) return child.clone();
+            return visit(child, i === body ? new Set([...bound, binder]) : bound);
+        }));
+    };
+    return visit(target, new Set());
+}
+
+// A biconditional pattern selects positions, not a new proof rule. Translate
+// its holes into the ordinary exact-match MSBT indices.
+function rewriteIndices(system: HilbertSystem, relation: AST, reverse: boolean, target: AST, pattern: AST): AST {
+    const from = relation.nodes[reverse ? 1 : 0];
+    const search = new MSBT(system, relation, true, target, true, !reverse);
+    search.searchIter(from, target, []);
+    const selected: AST[] = [];
+    const visit = (frame: AST, old: AST, pos: number[]) => {
+        if (frame.isAtom() === "#") {
+            const i = search.absPosRes.findIndex(p => MSBT.eq(p, pos));
+            if (i < 0) return fail("A rewrite placeholder does not match an eligible occurrence.");
+            selected.push(new AST(NodeType.ATOM_ITEM, String(i + 1)));
+            return;
+        }
+        if (frame.type !== old.type || frame.name !== old.name || frame.nodes.length !== old.nodes.length) {
+            return fail("The rewrite pattern does not reconstruct the current goal.");
+        }
+        frame.nodes.forEach((child, i) => visit(child, old.nodes[i], [...pos, i]));
+    };
+    visit(pattern, target, []);
+    if (!selected.length) return fail("The rewrite pattern needs a # placeholder.");
+    return new AST(NodeType.FN, "{}", ...selected);
+}
+
 interface Binding { id: number; formula: AST }
 interface Goal {
     id: number;
@@ -82,12 +145,14 @@ interface Goal {
 type Source = { kind: "binding"; id: number } | {
     kind: "rule"; name: AST; slots: Map<string, AST>; inputs: Source[];
 };
+interface Rewrite { source: Source; reverse: boolean; pattern?: AST }
 type Action =
     | { kind: "exact"; source: Source }
     | { kind: "intro"; folder: "c" | "v"; ast: AST; child: Goal }
     | { kind: "let"; source: Source; next: Goal }
     | { kind: "goal"; lemma: Goal; next: Goal }
-    | { kind: "apply"; source: Source; children: Goal[]; useMp: boolean };
+    | { kind: "apply"; source: Source; children: Goal[]; rulePremiseCount: number }
+    | { kind: "rewrite"; rewrite: Rewrite; child: Goal };
 interface Draft {
     pending: Goal[];
     actions: Map<number, Action>;
@@ -100,16 +165,21 @@ export class HilbertProofAssistant {
     private readonly root: Goal;
     private draft: Draft;
     private recorded = false;
+    private readonly history: { goal: number; text: string }[] = [];
 
     constructor(private readonly system: HilbertSystem, target: string, private readonly access?: SurvivalAccess) {
         const ast = this.formula(target.trim());
         this.root = { id: 0, target: ast, bindings: new Map(), variables: new Map() };
-        this.draft = { pending: [this.root], actions: new Map(), values: new Map(), nextId: 1 };
+        this.draft = this.initialDraft();
+    }
+
+    private initialDraft(): Draft {
+        return { pending: [this.root], actions: new Map(), values: new Map(), nextId: 1 };
     }
 
     snapshot() {
         const show = (ast: AST, goal: Goal) => {
-            const resolved = resolve(ast, this.draft.values);
+            const resolved = resolveFormula(ast, this.draft.values);
             const aliases = new Map([...goal.variables].map(([alias, binder]) => [binder, alias]));
             let displayed: AST;
             try { displayed = renameFreeItems(resolved, aliases); } catch { displayed = resolved; }
@@ -122,7 +192,16 @@ export class HilbertProofAssistant {
         };
         return {
             target: this.root.target.toString(),
+            history: this.history.map(({ goal, text }) => {
+                const action = this.draft.actions.get(goal)!;
+                const children = action.kind === "goal" ? [action.lemma, action.next]
+                    : action.kind === "apply" ? action.children
+                    : action.kind === "intro" || action.kind === "rewrite" ? [action.child]
+                    : action.kind === "let" ? [action.next] : [];
+                return { goal, text, children: children.map(child => child.id) };
+            }),
             goals: this.draft.pending.map(goal => ({
+                id: goal.id,
                 target: show(goal.target, goal),
                 context: [...goal.variables].map(([name]) => ({ name, formula: null as string | null }))
                     .concat([...goal.bindings].map(([name, binding]) => ({ name, formula: show(binding.formula, goal) }))),
@@ -130,15 +209,70 @@ export class HilbertProofAssistant {
         };
     }
 
+    undo(): boolean {
+        if (this.recorded || !this.history.length) return false;
+        const prefix = this.history.slice(0, -1);
+        // Replay before publishing so even a rule changed elsewhere cannot
+        // leave this draft in a partially reverted state.
+        const draft = prefix.reduce((state, { text }) => this.executeDraft(text, state), this.initialDraft());
+        this.history.pop();
+        this.draft = draft;
+        return true;
+    }
+
+    recommendations(): string[] {
+        const [goal] = this.draft.pending;
+        if (!goal) return ["qed"];
+        const target = resolveFormula(goal.target, this.draft.values);
+        const isUniversal = target.type === NodeType.QUANT && target.name === "\\a";
+        const suggestions: string[] = [];
+        if (implication(target) || isUniversal) {
+            try {
+                this.access?.checkCommand(isUniversal ? "var" : "cond");
+                const base = isUniversal ? target.nodes[0].name : "h";
+                if (!isUniversal || (variablePattern.test(base) && ![...goal.variables.values()].includes(base)
+                    && !goal.variables.has(base) && !goal.bindings.has(base))) {
+                    let name = base;
+                    for (let i = 1; goal.variables.has(name) || goal.bindings.has(name); i++) name = base + i;
+                    suggestions.push(`intro ${name}`);
+                }
+            } catch { /* The corresponding introduction is not unlocked. */ }
+        }
+        for (const [name, binding] of goal.bindings) {
+            let candidate = resolveFormula(binding.formula, this.draft.values);
+            let tactic = "exact";
+            while (true) {
+                try {
+                    unify(target, candidate, new Map(this.draft.values));
+                    suggestions.push(`${tactic} ${name}`);
+                    break;
+                } catch {
+                    if (!implication(candidate)) break;
+                    candidate = candidate.nodes[1];
+                    tactic = "apply";
+                }
+            }
+        }
+        return suggestions;
+    }
+
     execute(text: string) {
+        if (this.recorded) return fail("This proof has already been recorded.");
+        const goal = this.draft.pending[0]?.id;
+        this.draft = this.executeDraft(text, this.draft);
+        this.history.push({ goal: goal!, text: text.trim() });
+        return this.snapshot();
+    }
+
+    private executeDraft(text: string, previous: Draft): Draft {
         const [, command, argument = ""] = /^([a-z]+)(?:\s+([^\r\n]*))?$/.exec(text.trim()) ?? [];
-        const [current, ...remaining] = this.draft.pending;
+        const [current, ...remaining] = previous.pending;
         if (!current) return fail("The proof is complete. Use qed to record it.");
         const draft: Draft = {
-            pending: remaining, actions: new Map(this.draft.actions),
-            values: new Map(this.draft.values), nextId: this.draft.nextId,
+            pending: remaining, actions: new Map(previous.actions),
+            values: new Map(previous.values), nextId: previous.nextId,
         };
-        const target = resolve(current.target, draft.values);
+        const target = resolveFormula(current.target, draft.values);
         const subgoal = (formula: AST, bindings = current.bindings, variables = current.variables): Goal =>
             ({ id: draft.nextId++, target: formula, bindings, variables });
         const withBinding = (name: string, id: number, formula: AST) => new Map([...current.bindings, [name, { id, formula }]]);
@@ -180,31 +314,47 @@ export class HilbertProofAssistant {
             set({ kind: "let", source: expression.source, next }, next);
         } else if (command === "exact" || command === "apply") {
             const expression = this.source(argument, current, draft, command === "apply");
-            let conclusion = resolve(expression.conclusion, draft.values);
-            const premises = expression.premises.slice();
-            const useMp = command === "apply" && expression.source.kind === "binding";
-            // A local proof is rigid; only the goal's unsolved rule slots
-            // may be inferred when trying its successive implication tails.
-            while (useMp && implication(conclusion)) {
-                const trial = new Map(draft.values);
-                try { unify(target, conclusion, trial); } catch {
-                    premises.push(conclusion.nodes[0]);
-                    conclusion = conclusion.nodes[1];
-                    continue;
+            if (command === "exact") {
+                unify(target, expression.conclusion, draft.values);
+                set({ kind: "exact", source: expression.source });
+            } else {
+                const premises = expression.premises.slice();
+                let conclusion = resolveFormula(expression.conclusion, draft.values);
+                // Prefer the whole conclusion, then successively consume
+                // antecedents. A failed trial must not constrain the next one.
+                while (true) {
+                    const trial = new Map(draft.values);
+                    try {
+                        unify(target, conclusion, trial);
+                    } catch (error) {
+                        if (!implication(conclusion)) throw error;
+                        premises.push(conclusion.nodes[0]);
+                        conclusion = conclusion.nodes[1];
+                        continue;
+                    }
+                    draft.values = trial;
+                    break;
                 }
-                break;
-            }
-            unify(target, conclusion, draft.values);
-            if (command === "exact") set({ kind: "exact", source: expression.source });
-            else {
                 const children = premises.map(ast => subgoal(ast));
-                set({ kind: "apply", source: expression.source, children, useMp }, ...children);
+                set({ kind: "apply", source: expression.source, children, rulePremiseCount: expression.premises.length }, ...children);
             }
-        } else return fail("Use intro, exact, apply, goal, let, or qed.");
+        } else if (command === "rw" || command === "rwb") {
+            const [, name, pattern] = /^(\S+)(?:\s+(.+))?$/.exec(argument) ?? [];
+            if (!name) return fail(`Use ${command} h [pattern].`);
+            const { source } = this.source(name, current, draft, false);
+            const rewrite = { source, reverse: command === "rwb", pattern: pattern ?
+                renameFreeItems(this.parseFormula(pattern), current.variables) : undefined };
+            // Visit the focused goal in the same scope as qed; the kernel
+            // produces the implication before we publish the new goal.
+            const { rewriteTarget } = this.compile(draft, { id: current.id, rewrite });
+            if (!rewriteTarget) return fail("The rewrite needs its proof and goal to be determined.");
+            const child = subgoal(rewriteTarget);
+            set({ kind: "rewrite", rewrite, child }, child);
+            return draft;
+        } else return fail("Use intro, exact, apply, rw, rwb, goal, let, or qed.");
 
         this.compile(draft);
-        this.draft = draft;
-        return this.snapshot();
+        return draft;
     }
 
     qed(name?: string) {
@@ -232,9 +382,14 @@ export class HilbertProofAssistant {
         if (goal.bindings.has(name) || goal.variables.has(name)) fail(`Context name ${name} already exists.`);
     }
 
-    private formula(text: string, goal?: Goal): AST {
+    private parseFormula(text: string): AST {
         const ast = this.parser.parse(text, "wff");
         if (!ast || ast.end !== text.length) return fail("Expected one complete formula.");
+        return ast;
+    }
+
+    private formula(text: string, goal?: Goal): AST {
+        const ast = this.parseFormula(text);
         ast.checkWFF();
         ast.getReplvars();
         return reduceSubstitution(goal ? renameFreeItems(ast, goal.variables) : ast);
@@ -293,7 +448,7 @@ export class HilbertProofAssistant {
         return scratch;
     }
 
-    private compile(draft: Draft) {
+    private compile(draft: Draft, probe?: { id: number; rewrite: Rewrite }) {
         const scratch = this.scratch();
         const references = new Map<number, Proposition>();
         const active = () => scratch.saveContext().activeProp;
@@ -321,6 +476,45 @@ export class HilbertProofAssistant {
             }));
             return scratch.d(d, premises ?? source.inputs.map(p => use(p)), replacements);
         };
+        const rewriteArrow = (goal: Goal, { source, reverse, pattern }: Rewrite) => {
+            const target = reduceSubstitution(materialize(goal.target));
+            const proof = use(source);
+            const relation = inScope(proof);
+            const direction = (iff: Proposition, backward = false) => {
+                const [left, right] = inScope(iff).nodes;
+                return mp(scratch.d(builtin(backward ? ".<>1" : ".<>2"), [], { $1: left, $2: right }), iff);
+            };
+            let arrow: Proposition;
+            if (relation.type === NodeType.PRED && relation.name === "=") {
+                const [left, right] = relation.nodes;
+                const [from, to] = reverse ? [right, left] : [left, right];
+                const used = target.getLocalvars(relation.getLocalvars());
+                pattern?.getLocalvars(used);
+                let name = "#";
+                for (let i = 0; used.has(name); i++) name = "#" + i;
+                const marker = new AST(NodeType.ATOM_ITEM, name);
+                const frame = pattern ? pattern.clone().renameLocalVars_mut(new Map([["#", name]]))
+                    : equalityFrame(target, from, to, marker, scratch);
+                if (!frame.getLocalvars().has(name)) return fail(pattern ?
+                    "The rewrite pattern needs a # placeholder." : "No eligible occurrence to rewrite.");
+                const congruence = scratch.d(builtin(".a8<>"), [], { $1: left, $2: right, $3: frame, $0: marker });
+                arrow = direction(mp(congruence, proof), reverse);
+            } else if (relation.type === NodeType.LOGIC && relation.name === "<>") {
+                const name = new AST(NodeType.ATOM_DNAME, reverse ? "msbt<" : "msbt>");
+                this.access?.checkRuleName(name, scratch);
+                this.access?.checkScope(active());
+                if (!relation.equal(proof.ast)) return fail("The equivalence is not available in this scope.");
+                const indices = pattern ? rewriteIndices(scratch, relation, reverse, target, pattern)
+                    : new AST(NodeType.ATOM_ITEM, "0");
+                const iff = scratch.msbt([name, new AST(NodeType.ATOM_ITEM, String(proof.id)), target, indices]);
+                arrow = direction(iff);
+            } else return fail("Rewrite needs a proof of an equality or equivalence.");
+            const formula = inScope(arrow);
+            if (!implication(formula) || !formula.nodes[1].equal(target)) {
+                return fail("The rewrite pattern does not reconstruct the current goal.");
+            }
+            return { arrow, target: formula.nodes[0] };
+        };
         const finish = (p: Proposition) => {
             // A local proof may point outside this folder, or to an earlier
             // line. Reiterate only when necessary, using the base axioms.
@@ -331,9 +525,13 @@ export class HilbertProofAssistant {
                 .match(a1.conclusion);
             return mp(mp(scratch.d(a1, [], table), p), p);
         };
+        let rewriteTarget: AST | undefined;
         const visit = (goal: Goal): Proposition | undefined => {
             const action = draft.actions.get(goal.id);
-            if (!action) return undefined;
+            if (!action) {
+                if (probe?.id === goal.id) rewriteTarget = rewriteArrow(goal, probe.rewrite).target;
+                return undefined;
+            }
             let proof: Proposition | undefined;
             switch (action.kind) {
                 case "intro": {
@@ -360,6 +558,12 @@ export class HilbertProofAssistant {
                     proof = visit(action.next);
                     break;
                 }
+                case "rewrite": {
+                    const { arrow } = rewriteArrow(goal, action.rewrite);
+                    const premise = visit(action.child);
+                    if (premise) proof = mp(arrow, premise);
+                    break;
+                }
                 case "apply": {
                     const premises: Proposition[] = [];
                     for (const child of action.children) {
@@ -367,7 +571,8 @@ export class HilbertProofAssistant {
                         if (!p) return undefined;
                         premises.push(p);
                     }
-                    proof = action.useMp ? premises.reduce(mp, use(action.source)) : use(action.source, premises);
+                    const result = use(action.source, premises.slice(0, action.rulePremiseCount));
+                    proof = premises.slice(action.rulePremiseCount).reduce(mp, result);
                     break;
                 }
             }
@@ -378,9 +583,9 @@ export class HilbertProofAssistant {
         if (result) {
             const proof = finish(result);
             if (!inScope(proof).equal(this.root.target)) return fail("The checked proof does not match the original goal.");
-            return { scratch, proof };
+            return { scratch, proof, rewriteTarget };
         }
-        if (!draft.pending.length) fail("The proof has unresolved arguments.");
-        return { scratch, proof: undefined };
+        if (!probe && !draft.pending.length) fail("The proof has unresolved arguments.");
+        return { scratch, proof: undefined, rewriteTarget };
     }
 }
