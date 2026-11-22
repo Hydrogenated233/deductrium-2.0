@@ -159,6 +159,7 @@ type Action =
     | { kind: "exact"; source: Source }
     | { kind: "intro"; folder: "c" | "v"; ast: AST; child: Goal }
     | { kind: "let"; source: Source; next: Goal }
+    | { kind: "hyp"; formula: AST; next: Goal }
     | { kind: "goal"; lemma: Goal; next: Goal }
     | { kind: "apply"; source: Source; children: Goal[]; rulePremiseCount: number }
     | { kind: "rewrite"; rewrite: Rewrite; child: Goal };
@@ -206,7 +207,7 @@ export class HilbertProofAssistant {
                 const children = action.kind === "goal" ? [action.lemma, action.next]
                     : action.kind === "apply" ? action.children
                     : action.kind === "intro" || action.kind === "rewrite" ? [action.child]
-                    : action.kind === "let" ? [action.next] : [];
+                    : action.kind === "let" || action.kind === "hyp" ? [action.next] : [];
                 return {
                     goal, text, children: children.map(child => child.id),
                     quantifierIntro: action.kind === "intro" && action.folder === "v",
@@ -308,14 +309,26 @@ export class HilbertProofAssistant {
                 const child = subgoal(target.nodes[1], current.bindings, new Map([...current.variables, [argument, binder.name]]));
                 set({ kind: "intro", folder: "v", ast: binder, child }, child);
             } else return fail("Intro requires an implication or a universal quantifier.");
-        } else if (command === "goal") {
-            const match = /^(\S+)\s*:\s*(.+)$/.exec(argument);
-            if (!match) return fail("Use goal name : formula.");
+        } else if (command === "goal" || command === "hyp") {
+            const match = /^([^\s:]+)\s*:\s*(.+)$/.exec(argument);
+            if (!match) return fail(`Use ${command} name : formula.`);
             const [, name, text] = match;
             this.checkFresh(name, current);
-            const lemma = subgoal(this.formula(text, current));
-            const next = subgoal(current.target, withBinding(name, lemma.id, lemma.target));
-            set({ kind: "goal", lemma, next }, lemma, next);
+            const formula = this.formula(text, current);
+            if (command === "hyp") {
+                // Sheet hypotheses are rule premises, shared by the remaining goals.
+                const bindHyp = (goal: Goal): Goal => ({
+                    ...goal, bindings: new Map(goal.bindings).set(name, { id: current.id, formula }),
+                });
+                for (const goal of remaining) this.checkFresh(name, goal);
+                draft.pending = remaining.map(bindHyp);
+                const next = bindHyp(subgoal(current.target));
+                set({ kind: "hyp", formula, next }, next);
+            } else {
+                const lemma = subgoal(formula);
+                const next = subgoal(current.target, withBinding(name, lemma.id, formula));
+                set({ kind: "goal", lemma, next }, lemma, next);
+            }
         } else if (command === "let") {
             const match = /^(\S+)\s*:=\s*(.+)$/.exec(argument);
             if (!match) return fail("Use let name := source.");
@@ -359,7 +372,7 @@ export class HilbertProofAssistant {
             const child = subgoal(rewriteTarget);
             set({ kind: "rewrite", rewrite, child }, child);
             return draft;
-        } else return fail("Use intro, exact, apply, rw, rwb, goal, let, or qed.");
+        } else return fail("Use intro, hyp, exact, apply, rw, rwb, goal, let, or qed.");
 
         this.compile(draft);
         return draft;
@@ -631,6 +644,14 @@ export class HilbertProofAssistant {
                     break;
                 }
                 case "exact": proof = use(action.source); break;
+                case "hyp": {
+                    this.access?.checkCommand("hyp");
+                    const hypothesis = scratch.hyp(action.formula.clone());
+                    inScope(hypothesis); // A sheet premise cannot depend on a locally introduced variable.
+                    references.set(goal.id, hypothesis);
+                    proof = visit(action.next);
+                    break;
+                }
                 case "let":
                     references.set(goal.id, use(action.source));
                     proof = visit(action.next);

@@ -1609,6 +1609,8 @@ export class HilbertSystem {
     appendProof(steps: Proposition[], conclusion: AST) {
         const list = this.getActiveList();
         const length = list.length;
+        // Hypotheses insert at the sheet root, even when the proof is appended inside a folder.
+        const root = steps.some(step => step.from.type === "h") ? this.props.slice() : undefined;
         const anchor = this.activeProp;
         const replvars = new Map(this.replvars);
         const replvarVars = new Set(this.replvarVars);
@@ -1621,6 +1623,10 @@ export class HilbertSystem {
             }
         } catch (error) {
             list.length = length;
+            if (root) {
+                this.props.length = root.length;
+                root.forEach((prop, i) => { this.props[i] = prop; });
+            }
             this.replvars = replvars;
             this.replvarVars = replvarVars;
             for (const key of this.rules.keys()) if (!rules.has(key)) this.rules.delete(key);

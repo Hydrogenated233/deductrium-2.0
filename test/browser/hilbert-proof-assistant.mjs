@@ -248,6 +248,30 @@ try {
             const recorded = await page.evaluate(() => window.game.hsLayer.hilbertSystem.genCmd());
             assert.deepEqual(recorded, ['.i ¬$', 'msbt<(d\\/) 1 0']);
 
+            await page.locator('.sheet-tab-add').click();
+            await start('Q');
+            await input.pressSequentially('hyp h : P>Q');
+            assert.equal(await input.inputValue(), 'hyp h : P→Q');
+            assert.equal(await tacticPaint.locator('.token-cmd').textContent(), 'hyp');
+            await input.press('Enter');
+            assert.equal(await currentFormula.textContent(), 'Q');
+            assert.match(await current.textContent(), /h : P→Q/);
+            assert.equal(await history.last().locator('.token-cmd').textContent(), 'hyp');
+            await tactic('apply h');
+            assert.equal(await currentFormula.textContent(), 'P');
+            await tactic('hyp p : P');
+            await tactic('exact p');
+            await tactic('qed sHyp');
+            assert.equal(await status.isVisible(), false);
+            assert.equal(await target.isVisible(), true);
+            const premises = await page.evaluate(() => {
+                const layer = window.game.hsLayer;
+                layer.deserialize(structuredClone(layer.serialize()));
+                const hs = layer.hilbertSystem;
+                return { rule: hs.rules.get('sHyp').conditions.map(String), sheet: hs.genCmd().slice(0, 2) };
+            });
+            assert.deepEqual(premises, { rule: ['P→Q', 'P'], sheet: ['hyp P→Q', 'hyp P'] });
+
             assert.deepEqual(errors, []);
             console.log(`Proof assistant passed at ${viewport.width}×${viewport.height}`);
         } finally { await context.close(); }

@@ -55,6 +55,74 @@ test('named implication introduction, checked append, and macro expansion all pr
     assert.equal(conclusion(hs).equal(parse('(P→Q)→P→Q')), true);
 });
 
+test('hyp adds a named premise without a new goal and qed records a rule requiring it', () => {
+    const hs = fixture();
+    const a = new HilbertProofAssistant(hs, '$Q');
+    run(a, 'hyp f : $P→$Q', 'apply f', 'hyp p:$P');
+    assert.deepEqual(open(a), ['$P']);
+    assert.deepEqual(a.snapshot().goals[0].context, [
+        { name: 'f', formula: '$P→$Q' }, { name: 'p', formula: '$P' },
+    ]);
+    run(a, 'exact p');
+    assert.equal(hs.props.length, 0);
+    const rule = a.qed('sWithPremises');
+    assert.deepEqual(rule.conditions.map(String), ['$P→$Q', '$P']);
+    assert.ok(rule.conclusion.equal(parse('$Q')));
+    assert.deepEqual(hs.genCmd(), ['hyp $P→$Q', 'hyp $P', 'mp 1 2']);
+    hs.clear();
+    hs.fromCmd(['hyp A→B', 'hyp A', 'sWithPremises 1 2'].map(cmd => parse(cmd, 'cmd')));
+    hs.expand(hs.props.at(-1));
+    assert.ok(conclusion(hs).equal(parse('B')));
+});
+
+test('hyp is shared with pending goals and undone with the draft', () => {
+    const hs = fixture();
+    const a = new HilbertProofAssistant(hs, 'Q');
+    run(a, 'apply mp');
+    const before = a.snapshot();
+    run(a, 'hyp p : P', 'hyp f : P→Q', 'exact f');
+    assert.deepEqual(open(a), ['P']);
+    assert.deepEqual(a.recommendations(), ['exact p']);
+    assert.equal(a.undo(), true);
+    assert.equal(a.undo(), true);
+    assert.equal(a.undo(), true);
+    assert.deepEqual(a.snapshot(), before);
+});
+
+test('hyp validates syntax, names, unlocks, and quantifier scope without altering the draft', () => {
+    const hs = fixture();
+    const access = new SurvivalAccess(new Set(['1st']));
+    const a = new HilbertProofAssistant(hs, '∀x:x=x', access);
+    assert.throws(() => a.execute('hyp h : P'), e => e.type === 'lockedFeature');
+    access.rewards.add('hyp');
+    run(a, 'intro y');
+    const before = a.snapshot();
+    assert.throws(() => a.execute('hyp h : y=y'), e => e.type === 'capturePFail');
+    assert.throws(() => a.execute('hyp y : P'), /already exists/);
+    assert.throws(() => a.execute('hyp h : P junk'), /complete formula/);
+    assert.deepEqual(a.snapshot(), before);
+    run(a, 'hyp h:∀x:x=x');
+    assert.deepEqual(a.snapshot().goals[0].context.at(-1), { name: 'h', formula: '∀x:x=x' });
+    assert.deepEqual(hs.genCmd(), []);
+});
+
+test('qed rolls back inserted premises when a later hypothesis conflicts with the sheet', () => {
+    for (const folder of [false, true]) {
+        const hs = fixture();
+        hs.fromCmd(['hyp P', 'axeq $x', ...(folder ? ['cond Q'] : [])].map(cmd => parse(cmd, 'cmd')));
+        const original = [...hs.props];
+        const active = hs.saveContext().activeProp;
+        const commands = hs.genCmd();
+        const a = new HilbertProofAssistant(hs, '$x');
+        run(a, 'hyp h : R', 'hyp x : $x', 'exact x');
+        assert.throws(() => a.qed('sConflictingPremises'));
+        assert.deepEqual(hs.genCmd(), commands);
+        original.forEach((prop, i) => assert.equal(hs.props[i], prop));
+        assert.equal(hs.saveContext().activeProp, active);
+        assert.equal(hs.rules.has('sConflictingPremises'), false);
+    }
+});
+
 test('proof metavariables are rigid; fresh rule slots flow across premises independently', () => {
     const hs = fixture();
     const a = new HilbertProofAssistant(hs, '($x→$y)→$z→$x→$y');

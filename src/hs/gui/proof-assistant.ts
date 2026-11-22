@@ -46,20 +46,20 @@ class ProofInputParser implements IParser {
         };
         this.tokens = [];
         if (mode === "wff") return operand(0, "wff")!;
-        const head = /^(\s*)(intro|exact|apply|rw|rwb|goal|let|qed)(?=\s|$)(\s*)/.exec(text);
+        const head = /^(\s*)(intro|hyp|exact|apply|rw|rwb|goal|let|qed)(?=\s|$)(\s*)/.exec(text);
         if (!head) { literal(0, text.length); return null!; }
         const [, leading, command] = head;
         literal(0, leading.length, "space");
         literal(leading.length, leading.length + command.length, "cmd");
         literal(leading.length + command.length, head[0].length, "space");
         let offset = head[0].length;
-        if (command === "goal" || command === "let") {
-            const separator = command === "goal" ? /^\S+?\s*:\s*/ : /^\S+?\s*:=\s*/;
+        if (command === "goal" || command === "hyp" || command === "let") {
+            const separator = command === "let" ? /^\S+?\s*:=\s*/ : /^[^\s:]+\s*:\s*/;
             const name = separator.exec(text.slice(offset));
             if (!name) { literal(offset, text.length); return null!; }
             literal(offset, offset + name[0].length);
             offset += name[0].length;
-            return operand(offset, command === "goal" ? "wff" : "cmd")!;
+            return operand(offset, command === "let" ? "cmd" : "wff")!;
         }
         if (command === "exact" || command === "apply" || command === "rw" || command === "rwb") {
             return operand(offset, "cmd")!;
