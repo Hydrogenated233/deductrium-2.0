@@ -162,6 +162,44 @@ test('a context implication produces ordered premise goals, and exact can use a 
     assert.equal(conclusion(hs).equal(parse('(P→Q→R)→(P→Q)→P→R')), true);
 });
 
+test('apply consumes named proofs of a context implication before opening the remaining goals', () => {
+    const hs = fixture();
+    const target = '(A→B→C)→A→B→C';
+    const a = new HilbertProofAssistant(hs, target);
+    run(a, 'intro a', 'intro ha', 'intro hb');
+    const before = a.snapshot();
+    assert.throws(() => a.execute('apply a hb'), /does not match/);
+    assert.deepEqual(a.snapshot(), before);
+    run(a, 'apply a ha');
+    assert.deepEqual(open(a), ['B']);
+    assert.equal(a.undo(), true);
+    run(a, 'apply a ha hb');
+    assert.deepEqual(open(a), []);
+    a.qed();
+    assert.ok(conclusion(hs).equal(parse(target)));
+});
+
+test('apply combines explicit rule arguments, rule premises, and implication premises', () => {
+    const hs = fixture();
+    const target = 'H→P→Q→R';
+    const a = new HilbertProofAssistant(hs, target);
+    run(a, 'intro h', 'intro p', 'intro q', 'apply axchain h p');
+    assert.deepEqual(open(a), ['Q']);
+    run(a, 'exact q');
+    a.qed();
+    assert.ok(conclusion(hs).equal(parse(target)));
+
+    const b = new HilbertProofAssistant(fixture(), 'P→Q→P');
+    run(b, 'intro p', 'apply a1 P Q p');
+    assert.deepEqual(open(b), []);
+    b.qed();
+
+    const c = new HilbertProofAssistant(fixture(), 'P→p=p');
+    run(c, 'intro p', 'apply axeq (p)');
+    assert.deepEqual(open(c), [], 'parentheses make a context name a literal term argument');
+    c.qed();
+});
+
 test('apply lists native rule premises before the needed implication antecedents', () => {
     for (const [target, goals, tactics] of [
         ['R', ['H', 'P', 'Q'], ['exact h', 'exact p', 'exact q']],
@@ -311,6 +349,29 @@ function creative() {
     layer.addRules(initialCreativeRules, { refresh: false });
     return hs;
 }
+
+test('apply accepts the explicit Peano premises from the reported proof', () => {
+    for (const rule of ['<<d+2', 'd+2']) {
+        const hs = creative();
+        const target = '1+S(0)=S(1+0)';
+        const a = new HilbertProofAssistant(hs, target);
+        run(a, 'let h0 := apn1', 'goal h1 : 1∈ℕ', 'rw d1', 'apply <a4(apn2) 0', 'exact h0');
+        const before = a.snapshot();
+        assert.throws(() => a.execute(`apply ${rule} h1 h0 h0`), /Too many proof arguments/);
+        assert.deepEqual(a.snapshot(), before);
+        run(a, `apply ${rule} h1`);
+        assert.deepEqual(open(a), ['0∈ℕ']);
+        assert.equal(a.undo(), true);
+        run(a, `apply ${rule} h1 h0`);
+        assert.deepEqual(open(a), []);
+        a.qed('sPeanoApply');
+        assert.ok(conclusion(hs).equal(parse(target)));
+        const commands = hs.genCmd();
+        hs.clear();
+        hs.fromCmd(commands.map(cmd => parse(cmd, 'cmd')));
+        assert.ok(conclusion(hs).equal(parse(target)));
+    }
+});
 
 test('apply can use the reduced implication of a specialized rule directly after rw', () => {
     const hs = creative();

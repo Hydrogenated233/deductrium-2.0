@@ -106,6 +106,22 @@ try {
             assert.equal(await goals.textContent(), '无目标，请输入qed结束');
             await cancel.click();
 
+            await start('1+S(0)=S(1+0)');
+            await tactic('let h0 := apn1');
+            await tactic('goal h1 : 1∈ℕ');
+            await tactic('rw d1');
+            await tactic('apply <a4(apn2) 0 h0');
+            assert.equal(await status.isVisible(), false);
+            assert.equal(await currentFormula.textContent(), '1+S(0)=S(1+0)');
+            await tactic('apply <<d+2 h1');
+            assert.equal(await status.isVisible(), false);
+            assert.equal(await currentFormula.textContent(), '0∈ℕ');
+            await undo.click();
+            await tactic('apply <<d+2 h1 h0');
+            assert.equal(await status.isVisible(), false);
+            assert.equal(await goals.textContent(), '无目标，请输入qed结束');
+            await cancel.click();
+
             for (const rule of ['rw d\\/', 'rw d\\/ $ ~$']) {
                 await start('$∨¬$');
                 await input.pressSequentially(rule);

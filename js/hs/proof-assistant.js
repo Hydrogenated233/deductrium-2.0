@@ -204,7 +204,7 @@ export class HilbertProofAssistant {
             history: this.history.map(({ goal, text }) => {
                 const action = this.draft.actions.get(goal);
                 const children = action.kind === "goal" ? [action.lemma, action.next]
-                    : action.kind === "apply" ? action.children
+                    : action.kind === "apply" ? action.premises.flatMap(premise => "goal" in premise ? [premise.goal] : [])
                         : action.kind === "intro" || action.kind === "rewrite" ? [action.child]
                             : action.kind === "let" || action.kind === "hyp" ? [action.next] : [];
                 return {
@@ -359,8 +359,22 @@ export class HilbertProofAssistant {
                 set({ kind: "exact", source: expression.source });
             }
             else {
-                const premises = expression.premises.slice();
+                const args = expression.proofArgs;
+                const premises = expression.premises.map((formula, i) => {
+                    const proof = args[i];
+                    if (!proof)
+                        return { goal: subgoal(formula) };
+                    unify(formula, proof.formula, draft.values);
+                    return { binding: proof.id };
+                });
                 let conclusion = resolveFormula(expression.conclusion, draft.values);
+                for (const proof of args.slice(expression.premises.length)) {
+                    if (!implication(conclusion))
+                        return fail("Too many proof arguments.");
+                    unify(conclusion.nodes[0], proof.formula, draft.values);
+                    premises.push({ binding: proof.id });
+                    conclusion = resolveFormula(conclusion.nodes[1], draft.values);
+                }
                 // Prefer the whole conclusion, then successively consume
                 // antecedents. A failed trial must not constrain the next one.
                 while (true) {
@@ -371,15 +385,15 @@ export class HilbertProofAssistant {
                     catch (error) {
                         if (!implication(conclusion))
                             throw error;
-                        premises.push(conclusion.nodes[0]);
-                        conclusion = conclusion.nodes[1];
+                        premises.push({ goal: subgoal(conclusion.nodes[0]) });
+                        conclusion = resolveFormula(conclusion.nodes[1], draft.values);
                         continue;
                     }
                     draft.values = trial;
                     break;
                 }
-                const children = premises.map(ast => subgoal(ast));
-                set({ kind: "apply", source: expression.source, children, rulePremiseCount: expression.premises.length }, ...children);
+                const children = premises.flatMap(premise => "goal" in premise ? [premise.goal] : []);
+                set({ kind: "apply", source: expression.source, premises, rulePremiseCount: expression.premises.length }, ...children);
             }
         }
         else if (command === "rw" || command === "rwb") {
@@ -442,13 +456,15 @@ export class HilbertProofAssistant {
         return reduceSubstitution(goal ? renameFreeItems(ast, goal.variables) : ast);
     }
     source(text, goal, draft, mode) {
-        const binding = goal.bindings.get(text);
+        const [head, ...argsOfBinding] = mode === "apply" ? text.split(/\s+/) : [text];
+        const binding = goal.bindings.get(head);
         if (binding)
             return {
                 source: { kind: "binding", id: binding.id }, premises: [], conclusion: binding.formula,
+                proofArgs: argsOfBinding.map(arg => goal.bindings.get(arg) ?? fail(`Unknown premise: ${arg}.`)),
             };
-        if (goal.variables.has(text))
-            return fail(`${text} is a variable, not a proof.`);
+        if (goal.variables.has(head))
+            return fail(`${head} is a variable, not a proof.`);
         const cmd = this.parser.parse(`d ${text}`, "cmd");
         const [name, ...args] = cmd?.nodes ?? [];
         if (!name || cmd.end !== text.length + 2)
@@ -481,20 +497,30 @@ export class HilbertProofAssistant {
                 inputs.push({ kind: "binding", id: premise.id });
             });
         }
-        if (args.length > rule.replaceNames.length)
-            return fail("Too many rule arguments.");
-        args.forEach((arg, i) => {
-            const [key, item] = rule.replaceNames[i];
+        const proofArgs = [];
+        let slotIndex = 0;
+        for (const arg of args) {
             const part = text.slice(arg.start - 2, arg.end - 2);
+            // A bare context name supplies a proof. Parentheses preserve its
+            // use as a literal metavariable argument if the names coincide.
+            const proof = mode === "apply" && goal.bindings.get(part);
+            if (proof) {
+                proofArgs.push(proof);
+                continue;
+            }
+            if (slotIndex >= rule.replaceNames.length)
+                return fail("Too many rule arguments.");
+            const [key, item] = rule.replaceNames[slotIndex++];
             if (mode === "rewrite" && part === "_")
-                return;
+                continue;
             const parsed = this.parser.parse(part, item ? "item" : "wff");
             if (!parsed || parsed.end !== part.length)
                 return fail(`Invalid argument for ${key}.`);
             unify(slots.get(key), renameFreeItems(parsed, goal.variables), draft.values);
-        });
+        }
         return {
-            source: { kind: "rule", name, slots, inputs }, premises: mode === "apply" ? premises : [], conclusion: instance(rule.conclusion),
+            source: { kind: "rule", name, slots, inputs }, premises: mode === "apply" ? premises : [],
+            conclusion: instance(rule.conclusion), proofArgs,
         };
     }
     rewriteOperands(argument, goal) {
@@ -596,9 +622,10 @@ export class HilbertProofAssistant {
                 return fail("The rule changed while the proof was open.");
             return [key, materialize(slot)];
         }));
+        const reference = (id) => references.get(id) ?? fail("Proof binding is not available here.");
         const use = (source, premises) => {
             if (source.kind === "binding")
-                return references.get(source.id) ?? fail("Proof binding is not available here.");
+                return reference(source.id);
             const d = rule(source.name);
             return scratch.d(d, premises ?? source.inputs.map(p => use(p)), replacementsFor(d, source));
         };
@@ -755,8 +782,8 @@ export class HilbertProofAssistant {
                 }
                 case "apply": {
                     const premises = [];
-                    for (const child of action.children) {
-                        const p = visit(child);
+                    for (const premise of action.premises) {
+                        const p = "goal" in premise ? visit(premise.goal) : reference(premise.binding);
                         if (!p)
                             return undefined;
                         premises.push(p);
