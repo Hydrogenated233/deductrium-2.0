@@ -176,6 +176,49 @@ try {
                 });
                 assert.deepEqual(errors, []);
                 console.log(JSON.stringify({ viewport, savedGateRestoration: true }));
+                await page.evaluate(async () => {
+                    const { blockMap } = await import('/js/hy/maploader.js');
+                    const game = window.game, world = game.hyLayer.world, tt = game.ttLayer.getGui();
+                    const fresh = structuredClone(game.saveload.serialize());
+                    const hit = name => world.hitTest(world.getNamedBlockHash(name).split(',').map(Number));
+                    const check = (value, message) => { if (!value) throw Error(message); };
+                    const typeButton = document.querySelector('button[data-layer="T-layer"]');
+                    check(typeButton.classList.contains('hide'), 'type layer initially hidden');
+                    check(!tt.core.sysTypes.has('Ord'), 'Ord initially locked');
+                    check(!hit('#ω') && hit('omega') && hit('#ω') && hit('O1'), 'real ordinal entrance');
+                    hit('type');
+                    check(!typeButton.classList.contains('hide'), 'type reward reveals type layer');
+                    hit('ttord');
+                    check(tt.core.sysTypes.has('Ord') && !tt.core.sysTypes.has('Bool'), 'only ordinal definitions unlocked');
+                    typeButton.click();
+                    check(document.querySelector('#ttSysTable').textContent.includes('Ord'), 'Ord visible in type system table');
+                    tt.deserialize({ table: [{ content: 'savedOrd := omega' }, { content: 'savedOrd : Ord' },
+                        { content: 'natO 2 == succO (succO 0O)' }] }, true);
+                    check(tt.tableData.every(node => !node.ttErr && node.ttType), 'ordinal types check and compute');
+
+                    const rules = game.hsLayer.hilbertSystem.rules;
+                    for (const [reward, definitions] of [['aInf', ['ainf']], ['dw', ['d\\o']], ['dRel', ['dRel']],
+                        ['dOrder', ['dOrder', 'dWOrder']], ['dEquiv', ['dEquiv']], ['dPow', ['dpow']]]) {
+                        check(definitions.every(name => !rules.has(name)), `${reward} initially locked`);
+                        check(hit(reward) && definitions.every(name => rules.has(name) && !rules.get(name).error), `${reward} grants rules`);
+                    }
+                    hit('.filter');
+                    check(!rules.has('.filter'), 'lemma waits for prerequisites');
+                    for (const reward of ['.prop', 'neg', 'iff', 'andor', '1st', 'dE', 'dE!', 'aExt', 'aSep', 'a7', 'a8']) hit(reward);
+                    check(rules.get('.filter')?.step?.length && !rules.get('.filter').error, 'lemma has a checked proof');
+                    const filterGate = [...blockMap].find(([, tile]) => tile.data?.d && typeof tile.text === 'string'
+                        && tile.text.startsWith('#nf($0,$x),#dt($x $z),∃$x:'));
+                    check(filterGate && world.hitTest(filterGate[0].split(',').map(Number)), 'lemma matches its map gate');
+
+                    const earned = structuredClone(game.saveload.serialize());
+                    game.saveload.deserialize(fresh);
+                    check(!hit('#ω') && !tt.core.sysTypes.has('Ord') && typeButton.classList.contains('hide'), 'slot switch relocks entrance and type rewards');
+                    game.saveload.deserialize(earned);
+                    check(hit('#ω') && tt.tableData.every(node => !node.ttErr && node.ttType), 'slot switch restores Ord before checking entries');
+                    check(game.hsLayer.hilbertSystem.rules.get('.filter')?.step?.length, 'slot switch restores checked lemma');
+                });
+                assert.deepEqual(errors, []);
+                console.log(JSON.stringify({ viewport, survivalOrdinalRewards: true }));
             }
             await context.close();
         }

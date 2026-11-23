@@ -27,7 +27,7 @@ function layerWith(text = '') {
     if(text)layer.addRules(text);
     return layer;
 }
-const legacy = initialCreativeRules.slice(0, -numberRules.length);
+const legacy = initialCreativeRules.slice(0, initialCreativeRules.indexOf(numberRules));
 const errors = layer => [...layer.hilbertSystem.rules].filter(([,r])=>r.error).map(([n])=>n);
 function userMacro(layer,name='qUserKept') {
     layer.addRules(`${name}:⊢$p→$p;.i $p;`);

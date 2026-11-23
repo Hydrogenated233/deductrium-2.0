@@ -46,6 +46,8 @@ export const numberRules = String.raw`
         dN:ax: ⊢ℕ=ω;
         dRel:ax: ⊢∀a:∀b:∀r:(Rel(a,r,b)↔∃f:(f∈r∧f=(a,b)));
         dOrder:ax: ⊢∀x:∀r:(Order(x,r)↔(∀a:∀b:((a∈x∧b∈x)→((Rel(a,r,b)∨Rel(b,r,a))∧((Rel(a,r,b)∧Rel(b,r,a))↔a=b)))∧∀a:∀b:∀c:(((a∈x∧b∈x)∧c∈x)→((Rel(a,r,b)∧Rel(b,r,c))→Rel(a,r,c)))));
+        dWOrder:ax: ⊢∀x:∀r:(WellOrder(x,r)↔Order(x,r)∧∀s:((s⊂x∧¬s={})→∃m:(m∈s∧∀n:(n∈s→Rel(m,r,n)))));
+        dEquiv:ax: ⊢∀a:∀b:(Equiv(a,b)↔∃r:((∀x:(x∈a→∃!y:(y∈b∧Rel(x,r,y))))∧∀y:(y∈b→∃!x:(x∈a∧Rel(x,r,y)))));
         ${naturalSetBridgeTheorems}
         ${naturalSetTheorems}
     }

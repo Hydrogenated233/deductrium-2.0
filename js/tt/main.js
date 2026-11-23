@@ -25,8 +25,11 @@ export class TTLayer {
     serialize() {
         return this.gui.serialize();
     }
-    deserialize(data) {
-        this.gui.deserialize(data);
+    setOrdinalUnlocked(unlocked) {
+        this.gui.setOrdinalUnlocked(unlocked);
+    }
+    deserialize(data, ordinalUnlocked) {
+        this.gui.deserialize(data, ordinalUnlocked);
     }
     getGui() { return this.gui; }
     getCore() { return this.gui.core; }

@@ -54,7 +54,7 @@ class HSBoundary {
     serialize() { return { rules: [...this.rules], r: [...this.rules.keys()].map(name => `(1)${name}:ax:.`).join('\n') }; }
     deserialize(data) { this.rules = new Map(data.rules || []); }
 }
-class TTBoundary { serialize() { return {}; } deserialize() {} }
+class TTBoundary { serialize() { return {}; } deserialize() {} setOrdinalUnlocked() {} }
 class HyBoundary {
     constructor() {
         blockMap.clear(); nameMap.clear();
@@ -150,16 +150,12 @@ test('reward callback forwards independent rewards, ignores duplicate money and 
 
 const targets = {
     'del<>': 'port-iff', delK: 'K', delL: 'L', 'del-pn': '.pn', delAl: 'Aleph',
-    delAlw: 'AlephW', 'del-W': 'W', 'del-ttAleph': 'ttpAleph', mnt: 'port-rp', mcvt: 'V', omega: 'w',
+    delAlw: 'AlephW', 'del-W': 'W', 'del-ttAleph': 'ttpAleph', mnt: 'port-rp', mcvt: 'V', omega: '#ω',
 };
-test('all explicit targets and legacy mappings demolish and persist gates, including absent legacy w', () => {
+test('all explicit targets and legacy mappings demolish and persist gates,', () => {
     const game = makeGame();
-    // w belongs to the unported legacy ordinal naming scheme; supply that gate
-    // only to verify the mapping, without changing the production ordinal map.
-    assert.equal(nameMap.has('w'), false);
-    nameMap.set('w', '99'); blockMap.set('99', { name: 'w', type: Type.Gate, text: '', data: {} });
     for (const [reward, target] of Object.entries(targets)) {
-        if (target !== 'w') assert.equal(block(reward).data.dstrTarget, target, `${reward}: explicit map target`);
+        assert.equal(block(reward).data.dstrTarget, target, `${reward}: explicit map target`);
         hit(game, reward);
         assert.equal(block(target).type, Type.Road, `${reward} removes ${target}`);
         assert.equal(block(target).data.del, true);
@@ -439,6 +435,32 @@ test('existing automatic exits check erroneous axiom names and remain immune to 
         assert.equal(tile.type, Type.Gate);
         assert(!game.destructedGates.has(tile.name || hash));
     }
+});
+
+test('the omega reward opens the real entrance and old saves replay it', () => {
+    const enter = game => {
+        const gate = nameMap.get('#ω').split(',').map(Number);
+        const first = nameMap.get('O1').split(',').map(Number);
+        assert.deepEqual(gate, [1, 1]);
+        assert.deepEqual(first, [1, 2, 1]);
+        const { atlasTile } = game.hyLayer.world;
+        const adjacent = (from, to) => Array.from({ length: atlasTile.p }, (_, side) =>
+            atlasTile.getNeighborAndDir(from, side, true)[0].join(',')).includes(to.join(','));
+        assert(adjacent([], [1]) && adjacent([1], gate) && adjacent(gate, first));
+        assert.equal(hit(game, '#ω'), true);
+        assert.equal(hit(game, 'O1'), true);
+        assert.deepEqual(game.maxOrd, [1]);
+    };
+    const game = makeGame();
+    assert.equal(hit(game, '#ω'), false);
+    assert.equal(hit(game, 'omega'), true);
+    enter(game);
+    assert(game.saveload.serialize().dg.includes('#ω'));
+    enter(makeGame(saveData(['omega'])));
+    const legacy = makeGame(saveData(['omega'], ['w']));
+    enter(legacy);
+    assert.deepEqual([...legacy.destructedGates], ['#ω']);
+    assert.equal(hit(makeGame(), '#ω'), false);
 });
 
 test('ordinal gates use existing reachability, expand real tiles, and preserve ordinal gates with dG', () => {

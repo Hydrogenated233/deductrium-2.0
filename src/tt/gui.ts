@@ -85,6 +85,7 @@ export class TTGui {
     // 类型论核心：系统表注册 + 定理表检查
     core = new Core;
     creative: boolean;
+    private ordinalUnlocked = false;
     private sysView: TreeListViewer<TTSysNode>;
     private tableView: TreeListViewer<TTNode>;
     // 活动文件夹（定理表）：新命题默认添加到这里
@@ -107,7 +108,27 @@ export class TTGui {
 
     // 系统表动态更新后调用：重算 token 分类并重绘（高亮随系统表 refresh）
     applyTokenCategories() {
-        setTokenCategories(collectTokenCategories(initTypeSystem(this.creative)));
+        setTokenCategories(collectTokenCategories(initTypeSystem(this.creative, this.ordinalUnlocked)));
+    }
+
+    setOrdinalUnlocked(unlocked: boolean) {
+        if (this.creative || unlocked === this.ordinalUnlocked) return;
+        this.resetSystem(unlocked);
+        this.checkAll(this.tableData);
+        this.tableView.refresh();
+    }
+
+    private resetSystem(ordinalUnlocked: boolean) {
+        const changed = this.ordinalUnlocked !== ordinalUnlocked;
+        this.ordinalUnlocked = ordinalUnlocked;
+        const rules = initTypeSystem(this.creative, ordinalUnlocked);
+        this.core = new Core;
+        this.core.registerSystemRules(rules);
+        if (changed) {
+            this.applyTokenCategories();
+            this.sysData = buildSysData(rules);
+            this.sysView.setData(this.sysData);
+        }
     }
 
     // ===== 系统表（只读） =====
@@ -437,8 +458,9 @@ export class TTGui {
         iter(list);
         return out;
     }
-    deserialize(data: any) {
+    deserialize(data: any, ordinalUnlocked = false) {
         if (!data?.table) return;
+        this.resetSystem(ordinalUnlocked);
         // 清空并填充现有数组（TreeListViewer 持有同一引用，重新赋值会断引用）
         this.tableData.length = 0;
         const build = (arr: any[]): TTNode[] => arr.map(n => ({

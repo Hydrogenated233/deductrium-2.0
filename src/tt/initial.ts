@@ -471,6 +471,13 @@ export function initCreativeRules(): SysRule[] {
     return r;
 }
 
-export function initTypeSystem(creative: boolean): SysRule[] {
-    return creative ? initCreativeRules() : initMinimalRules();
+export function initTypeSystem(creative: boolean, ordinalUnlocked = false): SysRule[] {
+    if (creative) return initCreativeRules();
+    const minimal = initMinimalRules();
+    if (!ordinalUnlocked) return minimal;
+    // Ord's definitions use natural-number induction. Reuse just its
+    // declaration and computation rules, not the other creative nat definitions.
+    const support = initCreativeRules().filter(rule => rule.group === "Ord"
+        || (rule.group === "nat" && /^@?ind_nat(?:\s|:)/.test(rule.text)));
+    return [...minimal, ...support];
 }

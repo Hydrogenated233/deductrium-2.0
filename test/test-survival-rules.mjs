@@ -76,7 +76,7 @@ const mathMappings = new Map([
     ['dEquiv', ['dEquiv']], ['dPrime', ['dPrime']], ['dfZ', ['dfZ']], ['dZ', ['dZ']],
     ['dZ+', ['dZ+']], ['dZ*', ['dZ*']], ['dZ<=', ['dZ<=']], ['dZn', ['dZ-2', 'dZ-1', 'dZ0', 'dZ1', 'dZ2']],
 ]);
-for (const [id, targets] of mathMappings) mappings.set(id, targets.filter(name => builtinLines.has(name)));
+for (const [id, targets] of mathMappings) mappings.set(id, targets);
 for (const [id, expected] of mappings) check('direct reward ' + id, () => {
     assert.deepEqual(new Set(names(get(rewards(id))).filter(name => !['mp', 'a1', 'a2'].includes(name))), new Set(expected));
 });
@@ -395,5 +395,15 @@ check('each reward subset can load its closure in returned order', () => {
 check('mapped IDs are present in the current map', () => {
     const map = fs.readFileSync(new URL('../src/hy/map.ts', import.meta.url), 'utf8');
     for (const id of [...numberRewards, '.filter']) assert(map.includes('[[' + id + ']]'), id);
+});
+check('ordinal lemma requires earned set axioms and replays as a checked proof', () => {
+    const prerequisites = ['.prop', 'neg', 'iff', 'andor', '1st', 'dE', 'dE!', 'aExt', 'aSep', 'a7', 'a8'];
+    assert(!names(get(rewards(...prerequisites))).includes('.filter'));
+    assert(!names(get(rewards('.filter', ...prerequisites.filter(x => x !== 'aSep')))).includes('.filter'));
+    const system = new HilbertSystem();
+    const text = get(rewards('.filter', ...prerequisites));
+    assert(names(text).includes('.filter'));
+    load(system, text);
+    assert.ok(system.rules.get('.filter').step.length);
 });
 console.log(`${checks} survival-rule checks passed`);

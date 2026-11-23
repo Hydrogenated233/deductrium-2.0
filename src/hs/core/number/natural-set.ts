@@ -17,7 +17,7 @@ const rel = (a: string, b: string) => `Rel(${a},${orderRelation},${b})`;
 
 class Proof {
     commands: string[] = [];
-    private next = 0;
+    constructor(private next = 0) {}
     private witness = 0;
     step(rule: string, ...args: (string | number)[]): number {
         this.commands.push(`${rule === 'mcpt' ? 'mcpt' : `d ${rule}`} ${args.join(' ')}`.trimEnd());
@@ -374,3 +374,54 @@ closed('.<=Order', [], `Order(ℕ,${orderRelation})`, p => {
  * historical order theorems. NBG's unary Rel(r) is a different predicate.
  */
 export const naturalSetTheorems: string = rules.join('\n');
+
+// Bounded separation: choose a bound, separate within it, then use
+// extensionality to show that every set with the desired members is equal.
+function boundedSeparation(): string {
+    const premise = 3; // After the two assertions in the rule header.
+    const p = new Proof(premise);
+    const x = '$x', z = '$z', predicate = '$0';
+    const bounded = (a: string) => all(z, imp(predicate, mem(z, a)));
+    const separated = (a: string, b: string) => all(z, `(${mem(z, b)}↔${and(mem(z, a), predicate)})`);
+    const defining = (b: string) => all(z, `(${mem(z, b)}↔${predicate})`);
+    const unique = `∃!${x}:${defining(x)}`;
+    p.existsElim(x, bounded, unique, premise, (a, bound) => {
+        const y = '#filterY';
+        const separation = p.spec(p.step('asep', x, y, z, predicate), a);
+        return p.existsElim(y, b => separated(a, b), unique, separation, (b, subset) => {
+            p.variable(z);
+            const sep = p.spec(subset, z), inBound = p.spec(bound, z);
+            const member = p.cond(mem(z, b));
+            const hasProperty = p.step('./\\2', p.forward(sep, member)); p.pop();
+            const property = p.cond(predicate);
+            const inSubset = p.backward(sep, p.step('./\\', p.mp(inBound, property), property)); p.pop();
+            const pointwiseCharacterization = p.step('.<>', hasProperty, inSubset); p.pop();
+            const characterization = p.mp(p.step('.i', defining(b)), pointwiseCharacterization);
+
+            p.variable(x);
+            const another = p.cond(defining(x));
+            // Rename the axiom's literal binders before instantiating it
+            // with a schematic variable that could itself be named y or z.
+            const u = '#filterU', v = '#filterV';
+            p.variable(u); p.variable(v);
+            const ext = p.spec(p.step('aext'), u, v);
+            const hypothesis = p.cond(all(z, `(${mem(z, u)}↔${mem(z, v)})`));
+            p.variable('z');
+            const pointwise = p.spec(hypothesis, 'z'); p.pop();
+            const extensionality = p.mp(ext, pointwise);
+            p.pop(); p.pop(); p.pop();
+            p.variable(z);
+            const sameMembers = p.step('.<>t', p.spec(another, z), p.step('.<>s', p.spec(characterization, z)));
+            p.pop();
+            const equal = p.mp(p.spec(extensionality, x, b), sameMembers); p.pop();
+            const equality = p.cond(eq(x, b));
+            const same = p.rewrite(p.step('.=s', equality), b, x, characterization, defining('#')); p.pop();
+            const iff = p.step('.<>', equal, same); p.pop();
+            const exists = p.exists(y, all(x, `(${defining(x)}↔${eq(x, y)})`), b, iff);
+            return p.backward(p.step('d\\e!', x, defining(x), y), exists);
+        });
+    });
+    return `.filter:#nf(${predicate},${x}),#dt(${x} ${z}),∃${x}:${bounded(x)}⊢${unique};${p.commands.join(';')};`;
+}
+
+export const boundedSeparationTheorem = boundedSeparation();

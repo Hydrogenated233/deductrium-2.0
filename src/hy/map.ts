@@ -51,7 +51,7 @@ export const mapData = `
 :%,2$[=getD:8]
 :dL,2#[p]A→(A→A)
 :%*,3#[[preord]][zh]健身俱乐部会员：[n]进度层中累计的[n]总方块步数达到[n]256步才能通过此门[en]Jogging Club Member:[n]To pass through this gate[n]The total block steps in progress layer[n]must reach 256 steps
-:%*,3,1$[[omega]][=dstrTarget:"w"][=dstr:"#ω"]
+:%*,3,1$[[omega]][=dstrTarget:"#ω"][=dstr:"#ω"]
 :%,4@[zh]提示：解锁符号“~”后[n]才能开这些门[n]另外：[n]大写字母为系统保留[n]建议输入小写字母[en]Hint: You can only open these[n] gates after unlocking the symbol "~"[n]Other Hints: Uppercase[n] letters are reserved by the system[n]Lowercase letters are recommended
 :%,4@[zh]向前走，有推出[n]A>A[n]的提示[en]Go forward for a hint[n] on deriving A>A
 :%,5@
@@ -405,7 +405,7 @@ export const mapData = `
 :%*,3,5$[[mnt]][=dstrTarget:"port-rp"][=ac:"mnt"][=dstr:"#rp"]
 :%*,3,4$[=getD:333]
 :%,2#[=payD:100]
-:%*,5$[[type]][=ac:"type"][=unl:true][zh]类型层[en]type layer
+:%*,5$[[type]][=ac:"type"][=unl:{layer:"T-layer"}][zh]类型层[en]type layer
 :%*,3$[[peano]][=ac:"peano"][=unl:true][zh]皮亚诺公理[n]apn1 - apn5[n]与10以内数字定义[en]Peano axioms[n]apn1 - apn5[n]and definitions for numbers ≤10
 :%,1$[[aExt]][=ac:"aExt"][=unl:true][zh]ZFC集合论[n]外延公理(aExt)[en]ZFC set theory[n]axiom of extensionality (aExt)
 :%,2@[zh]卡住了？可交钱绕行[en]Stucked? Pay deductrium to bypass
@@ -1730,7 +1730,7 @@ export const mapData = `
 1,2,2,1,2,2,3,1,2,3,1,2,3,1,2,3,1,3,1,3,1,3,1,3,1,3,2,2,2,2,2,1,3@[zh]你终于找到这里来啦！[n]并集公理是说[n]每个集合x的元素（也是集合）[n]中的所有元素能放在一起[n]构成新集合[en]You finally found your way here![n]The Axiom of Union says[n]that all elements of the elements [n](which are also sets)[n]of every set x can be put together[n]to form a new set.
 :%,3@[zh]我们还需要结合分离公理aSep[n]得到不包含其它元素[n]的集合union(x)[en]We also need to combine this [n]with the Axiom of Separation (aSep)[n]to obtain the set union(x)[n]which contains no other elements.
 :%*,2@[zh]这听起来有点复杂[n]你可以花钱买这个引理[n]它还能构造幂集、[n]自然数集等集合哦[en]This sounds a bit complicated.[n]You can buy this lemma;[n]it can also construct the power set,[n] natural numbers, and other sets.
-:%*,2,5#[d]∃x:∀z:(#nf($0,x) → z∈x)⊢∃!x:∀z:(z∈x ↔ #nf($0,x))
+:%*,2,5#[d]#nf($0,$x),#dt($x $z),∃$x:∀$z:($0→$z∈$x)⊢∃!$x:∀$z:($z∈$x↔$0)
 :%*,2,5,2$[[.filter]][=unl:true][zh]引理“.filter”[en]the lemma ".filter"
 :%*,2,4#[=payD:3e3]
 

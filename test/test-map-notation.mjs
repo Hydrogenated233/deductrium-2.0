@@ -27,8 +27,10 @@ function walk(ast, visit) { visit(ast); ast.nodes.forEach(child => walk(child, v
 test('notation migration preserves every tile address, name, reward, flag and type-layer gate', () => {
     assert.equal(blockMap.size, 2096);
     assert.equal(nameMap.size, 501);
+    assert.equal(blockMap.get(nameMap.get('omega')).data.dstrTarget, '#ω');
+    assert.deepEqual(blockMap.get(nameMap.get('type')).data.unl, { layer: 'T-layer' });
     assert.equal(hash([...blockMap].map(([hash, { type, name, data }]) => [hash, type, name, data])),
-        'fda1dfb73c157ad3fde7acacf9c556d54f6fbcfe6375287610b1955fb4955752');
+        'b67e8d6925cbd29b6bed875e05956c25c65b1d7ff6bbe4dbf1c0be502fa07b53');
     assert.equal(hash([...nameMap]), '011e2faebb70f68f8b8cc2812d887197b83500f591f41442d17e821248945e18');
     assert.equal(hash([...blockMap].filter(([, tile]) => tile.data?.t || tile.data?.td)),
         '64901398038a22b35e971134bab30d446ed26fa1e91f811cf408780f56005f67');

@@ -17,7 +17,7 @@ const gameMode = gameModeURL === "creative" ? gameModeURL : "survival";
 const legacyDestructionTargets: Record<string, string> = {
     "del<>": "port-iff", delK: "K", delL: "L", "del-pn": ".pn",
     delAl: "Aleph", delAlw: "AlephW", "del-W": "W", "del-ttAleph": "ttpAleph",
-    mnt: "port-rp", mcvt: "V", omega: "w",
+    mnt: "port-rp", mcvt: "V", omega: "#ω",
 };
 const ordinalRewardTargets: Record<string, number[]> = {
     "w^2": [1, 2, 2], "w^3": [1, 2, 2, 2], "ww2": [1, 2, 3, 2, 3],
@@ -67,12 +67,11 @@ class Game {
         };
     }, (data) => {
         if (data.hs) this.hsLayer.deserialize(data.hs, gameMode === "creative" ? initialCreativeRules : undefined);
-        if (data.tt) this.ttLayer.deserialize(data.tt);
         if (gameMode === "survival") {
             if (data.hy) this.hyLayer.deserialize(data.hy);
             else this.hyLayer.world.currentOrd = [];
             this.gotRewards = new Set(data.rw);
-            this.destructedGates = new Set(data.dg);
+            this.destructedGates = new Set((data.dg ?? []).map((key: string) => key === "w" ? "#ω" : key));
             this.gotAchievements = new Set(data.ac);
             this.unlockedInfos = new Set((Array.isArray(data.in) ? data.in : [])
                 .map(knowledgeId).filter((id: string | undefined): id is string => id !== undefined));
@@ -83,12 +82,20 @@ class Game {
             this.maxOrd = [...(data.mo ?? this.hyLayer.world.currentOrd ?? [])];
             this.ordBase = data.ob ?? 15;
             this.applyGotRewards();
+            const ordinalUnlocked = this.gotRewards.has("ttord")
+                || this.gotRewards.has(nameMap.get("ttord") ?? "ttord");
+            this.ttLayer.deserialize(data.tt ?? { table: [] }, ordinalUnlocked);
             this.updateStats();
             this.progressLayer.refreshAchievements();
             this.progressLayer.refreshSymbols();
             this.progressLayer.refreshKnowledge();
+        } else if (data.tt) {
+            this.ttLayer.deserialize(data.tt);
         }
         this.switchLayer(data.ly);
+        if (gameMode === "survival" && document.querySelector('.layer-buttons button.active')?.classList.contains("hide")) {
+            this.switchLayer("G-layer");
+        }
     })
     progressLayer = new ProgressLayer(this.saveload, gameMode, (id) => this.isAchievementGot(id), (id) => this.isInfoUnlocked(id));
     constructor() {
@@ -275,7 +282,7 @@ class Game {
         for (const [hash, initial] of this.initialMapState) blockMap.set(hash, { ...initial, data: { ...initial.data } });
         for (const [name, hash] of this.initialMapNames) nameMap.set(name, hash);
         this.restoreOrdinalMap();
-        for (const layer of ["D-layer", "P-layer"]) this.showLayerButton(layer, false);
+        for (const layer of ["D-layer", "P-layer", "T-layer"]) this.showLayerButton(layer, false);
         for (const key of this.gotRewards) {
             this.unlockInfos(rewardKnowledgeIds(key), false);
             // key 可能是 name（经 nameMap 转 hash）或 hash 本身
@@ -288,7 +295,7 @@ class Game {
             if (block.type === TileBlockType.Reward && !/^JJZ[OI]-[12]$/.test(block.name ?? "")) {
                 block.type = TileBlockType.Road;
             }
-            this.applyUnlockEffect(block);
+            this.applyUnlockEffect(block, true);
         }
         for (const key of this.destructedGates) {
             const block = blockMap.get(nameMap.get(key) ?? key);
@@ -308,8 +315,9 @@ class Game {
         this.destructedGates.add(block.name || key);
     }
     // 单个奖励的独立效果：层按钮、推理层奖励与定点拆门；不发钱、不重置救济站。
-    private applyUnlockEffect(block: TileBlock) {
+    private applyUnlockEffect(block: TileBlock, restoring = false) {
         if (block.name) this.hsLayer.applyReward(block.name);
+        if (!restoring && block.name === "ttord") this.ttLayer.setOrdinalUnlocked(true);
         if (block.name === "cmpss") this.hyLayer.world.navigateDraw = true;
         if (block.name === "highlightd") this.hyLayer.world.highLightGetD = true;
         if (block.name && (/^base(?:-\d+|[2-5])$/.test(block.name)

@@ -1,3 +1,4 @@
+import { boundedSeparationTheorem } from "./number/natural-set.js";
 import { numberRules } from "./number/rules.js";
 export const initialSurvivalRules =
 `mp:ax: $1→$2, $1 ⊢ $2;
@@ -151,4 +152,8 @@ export const initialCreativeRules =
         angchoice:ax: ⊢∃fn:(Fn(fn)∧∀x∈.U:(¬x={}→∃y∈x:(x,y)∈fn));
     }
 }
-` + numberRules;
+` + numberRules + `
+{ [zh]集合论引理 [en]Set Theory Lemmas
+    ${boundedSeparationTheorem}
+}
+`;
