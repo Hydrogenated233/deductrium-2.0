@@ -616,7 +616,7 @@ export const mapData = `
 :%,1@[zh]旁边付费看提示[en]Pay nearby to see the hint.
 :%,1#[[.pn4]][p]∀x:∀y:(x∪{x}=y∪{y}→x=y)
 :%,2;1;1;1;1;1;1@...............
-:%,1#[[.pn5]][d]#nf($0,x) ⊢ #sb($0,$1,{})→(∀x:(x∈ω→(#sb($0,$1,x)→#sb($0,$1,x∪{x})))→∀x:(x∈ω→#sb($0,$1,x)))
+:%,1#[[.pn5]][d]⊢#sb($P,$n,{})→∀$n:($n∈ω→$P→#sb($P,$n,$n∪{$n}))→∀$n:($n∈ω→$P)
 :%,2;1;1;1@................
 :%,1$[[del-pn]][=dstrTarget:".pn"][=dstr:"#pn"]
 :%,1#[[.pn]][zh]未解锁的闸门无法通过[n]请寻找线索解开闸门[n]#pn[en]Locked gate cannot be passed.[n]Find clues to unlock it[n]#pn.
